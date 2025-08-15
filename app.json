@@ -60,7 +60,7 @@
             "enableShrinkResourcesInReleaseBuilds": true,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "minSdkVersion": 21,
+            "minSdkVersion": 24,
             "kotlinVersion": "1.9.25",
             "gradleVersion": "8.0.2",
             "androidGradlePluginVersion": "8.0.2"
