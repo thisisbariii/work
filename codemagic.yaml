@@ -14,14 +14,13 @@ workflows:
       groups:
         - env
       node: 18
-      npm: latest
     scripts:
       - name: Install dependencies
         script: |
           npm ci
       - name: Install Expo CLI
         script: |
-          npm install -g @expo/cli eas-cli
+          npm install -g @expo/cli
       - name: Expo prebuild
         script: |
           npx expo prebuild --platform android --clean
