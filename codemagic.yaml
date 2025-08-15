@@ -12,7 +12,7 @@ workflows:
           source: true
     environment:
       groups:
-        - expo_credentials
+        - env
       node: 18
       npm: latest
     scripts:
