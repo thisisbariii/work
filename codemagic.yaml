@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Debug APK Generation
+    name: Email APK Delivery
     max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
@@ -16,18 +16,12 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Install dependencies
+      - name: Setup and build
         script: |
           npm cache clean --force
           npm install
-      
-      - name: Install Expo CLI
-        script: |
           npm install -g @expo/cli@latest
-          npx expo --version
-      
-      - name: Create minimal app.json
-        script: |
+          
           cat > app.json << 'EOF'
           {
             "expo": {
@@ -42,11 +36,7 @@ workflows:
             }
           }
           EOF
-          echo "Created minimal app.json:"
-          cat app.json
-      
-      - name: Create basic app structure
-        script: |
+          
           cat > App.tsx << 'EOF'
           import React from 'react';
           import { Text, View, StyleSheet } from 'react-native';
@@ -72,70 +62,43 @@ workflows:
             },
           });
           EOF
-          rm -rf app/
-      
-      - name: Prebuild Android
-        script: |
-          rm -rf android ios .expo
-          npx expo prebuild --platform android --clean --no-install
-          echo "=== Android folder created ==="
-          ls -la android/
-      
-      - name: Configure Android build
-        script: |
-          cd android
           
+          rm -rf app/ android ios .expo
+      
+      - name: Build and upload APK
+        script: |
+          npx expo prebuild --platform android --clean --no-install
+          
+          cd android
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m
-          org.gradle.parallel=true
-          org.gradle.daemon=true
           android.useAndroidX=true
           android.enableJetifier=true
           kotlin.version=1.8.22
           EOF
           
           chmod +x ./gradlew
-          echo "=== Gradle configured ==="
-      
-      - name: Build APK with detailed logging
-        script: |
-          cd android
-          echo "=== Cleaning project ==="
           ./gradlew clean
+          ./gradlew assembleDebug --stacktrace
           
-          echo "=== Building debug APK ==="
-          ./gradlew assembleDebug --stacktrace --info
-          
-          echo "=== POST-BUILD: Searching entire project for APK files ==="
-          find . -name "*.apk" -type f -exec ls -la {} \;
-          
-          echo "=== Checking specific output directories ==="
-          find . -path "*/outputs/*" -type f -exec ls -la {} \;
-          
-          echo "=== Checking app/build structure ==="
-          find app/build -type f -name "*.apk" 2>/dev/null || echo "No APK in app/build"
-          
-          echo "=== Directory structure of app/build/outputs ==="
-          ls -laR app/build/outputs/ 2>/dev/null || echo "No outputs directory"
-      
-      - name: Force create APK file for testing
-        script: |
-          echo "=== Creating test APK file to verify artifact collection ==="
-          echo "This is a test APK file" > test-app.apk
-          ls -la test-app.apk
-          
-          echo "=== Creating build directory structure ==="
-          mkdir -p android/app/build/outputs/apk/debug
-          echo "This is a test debug APK" > android/app/build/outputs/apk/debug/app-debug.apk
-          ls -la android/app/build/outputs/apk/debug/
-          
-          echo "=== Final search for all APK files ==="
-          find . -name "*.apk" -type f
+          echo "=== Finding and uploading APK ==="
+          APK_FILE=$(find . -name "*.apk" -type f | head -1)
+          if [ -n "$APK_FILE" ]; then
+            echo "Found APK: $APK_FILE"
+            
+            # Upload to a temporary file sharing service
+            curl -F "file=@$APK_FILE" https://file.io | tee upload_result.txt
+            
+            echo "=== APK uploaded successfully ==="
+            cat upload_result.txt
+          else
+            echo "No APK file found!"
+            find . -name "*.apk" -type f
+          fi
     
     artifacts:
       - "**/*.apk"
-      - test-app.apk
-      - android/app/build/outputs/apk/debug/app-debug.apk
+      - upload_result.txt
     
     publishing:
       email:
