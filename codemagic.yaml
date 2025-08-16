@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Hermes Fix Build
+    name: Nuclear Fix - Replace build.gradle
     max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
@@ -16,12 +16,13 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Quick setup
+      - name: Setup and prebuild
         script: |
           npm cache clean --force
           npm install
           npm install -g @expo/cli@latest
           
+          # Minimal app.json
           cat > app.json << 'EOF'
           {
             "expo": {
@@ -32,20 +33,12 @@ workflows:
                 "package": "com.untold.shareapp",
                 "versionCode": 1
               },
-              "plugins": [
-                [
-                  "expo-build-properties",
-                  {
-                    "android": {
-                      "enableHermes": true
-                    }
-                  }
-                ]
-              ]
+              "plugins": []
             }
           }
           EOF
           
+          # Simple App.tsx
           cat > App.tsx << 'EOF'
           import React from 'react';
           import { Text, View, StyleSheet } from 'react-native';
@@ -53,8 +46,8 @@ workflows:
           export default function App() {
             return (
               <View style={styles.container}>
-                <Text style={styles.text}>🎉 Untold App - Share & Heal 🎉</Text>
-                <Text style={styles.subtitle}>Your journey starts here!</Text>
+                <Text style={styles.text}>🎉 Untold App 🎉</Text>
+                <Text style={styles.subtitle}>Built successfully!</Text>
               </View>
             );
           }
@@ -82,24 +75,75 @@ workflows:
           EOF
           
           rm -rf app/ android ios .expo
-      
-      - name: Prebuild and fix Hermes
-        script: |
           npx expo prebuild --platform android --clean --no-install
-          
+      
+      - name: Nuclear fix - Replace app/build.gradle completely
+        script: |
           cd android
           
-          echo "=== Fixing Hermes configuration in app/build.gradle ==="
-          # Fix the hermesEnabled property issue
-          sed -i.bak 's/hermesEnabled/enableHermes/g' app/build.gradle
+          echo "=== Original app/build.gradle causing issues ==="
+          echo "Lines around error (line 172):"
+          sed -n '165,180p' app/build.gradle || echo "Cannot show lines"
           
-          # Also ensure Hermes is properly defined
-          sed -i.bak '/enableHermes.*=/d' app/build.gradle
-          sed -i.bak '/project.ext.react/a\
-          def enableHermes = project.ext.react.get("enableHermes", true)' app/build.gradle
+          echo "=== Replacing entire app/build.gradle ==="
+          cat > app/build.gradle << 'EOF'
+          apply plugin: "com.android.application"
+          apply plugin: "org.jetbrains.kotlin.android"
+          apply plugin: "com.facebook.react"
           
-          echo "=== Checking app/build.gradle for Hermes references ==="
-          grep -n -A 5 -B 5 "ermes" app/build.gradle || echo "No Hermes references found"
+          def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+          
+          android {
+              ndkVersion rootProject.ext.ndkVersion
+              compileSdk rootProject.ext.compileSdkVersion
+              
+              namespace 'com.untold.shareapp'
+              
+              defaultConfig {
+                  applicationId 'com.untold.shareapp'
+                  minSdk rootProject.ext.minSdkVersion
+                  targetSdk rootProject.ext.targetSdkVersion
+                  versionCode 1
+                  versionName "1.0.0"
+              }
+              
+              signingConfigs {
+                  debug {
+                      storeFile file('debug.keystore')
+                      storePassword 'android'
+                      keyAlias 'androiddebugkey'
+                      keyPassword 'android'
+                  }
+              }
+              
+              buildTypes {
+                  debug {
+                      signingConfig signingConfigs.debug
+                  }
+                  release {
+                      signingConfig signingConfigs.debug
+                      minifyEnabled false
+                      proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+                  }
+              }
+          }
+          
+          dependencies {
+              implementation("com.facebook.react:react-android")
+              implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.0.0")
+              debugImplementation("com.facebook.flipper:flipper:0.201.0")
+              debugImplementation("com.facebook.flipper:flipper-network-plugin:0.201.0")
+              debugImplementation("com.facebook.flipper:flipper-fresco-plugin:0.201.0")
+              
+              if (hermesEnabled.toBoolean()) {
+                  implementation("com.facebook.react:hermes-android")
+              } else {
+                  implementation jscFlavor
+              }
+          }
+          
+          apply from: new File(["node", "--print", "require.resolve('@react-native/gradle-plugin/package.json')"].execute(null, rootDir).text.trim(), "../src/main/groovy/on-after-evaluate.gradle")
+          EOF
           
           echo "=== Setting up gradle.properties ==="
           cat > gradle.properties << 'EOF'
@@ -108,12 +152,17 @@ workflows:
           android.enableJetifier=true
           kotlin.version=1.8.22
           
-          # React Native specific
+          # React Native
           FLIPPER_VERSION=0.201.0
           reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64
           newArchEnabled=false
           hermesEnabled=true
           EOF
+          
+          # Also fix root build.gradle if needed
+          if grep -q "kotlin.*1.9.24" build.gradle; then
+            sed -i.bak 's/kotlin.*version.*"1.9.24"/kotlin("android") version "1.8.22"/g' build.gradle
+          fi
           
           chmod +x ./gradlew
       
@@ -121,74 +170,66 @@ workflows:
         script: |
           cd android
           
-          echo "=== Cleaning project ==="
+          echo "=== Building APK ==="
           ./gradlew clean
-          
-          echo "=== Building debug APK ==="
-          ./gradlew assembleDebug --stacktrace --info
+          ./gradlew assembleDebug --stacktrace --debug
           
           echo "=== Searching for APK ==="
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
           
           if [ -n "$APK_FILE" ]; then
-            echo "✅ Found APK: $APK_FILE"
+            echo "✅ SUCCESS! Found APK: $APK_FILE"
             APK_SIZE=$(ls -lh "$APK_FILE" | awk '{print $5}')
             echo "📱 APK Size: $APK_SIZE"
             
-            # Rename APK with timestamp
             TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-            NEW_NAME="UntoldApp_${TIMESTAMP}.apk"
+            NEW_NAME="UntoldApp_FIXED_${TIMESTAMP}.apk"
             cp "$APK_FILE" "../$NEW_NAME"
             
-            echo "=== Uploading to cloud services ==="
+            echo "🚀 Uploading to cloud..."
             
             # Upload to file.io
-            echo "📤 Uploading to file.io..."
             UPLOAD_RESPONSE=$(curl -F "file=@../$NEW_NAME" https://file.io)
-            echo "Upload Response: $UPLOAD_RESPONSE"
-            
-            # Extract download link
             DOWNLOAD_LINK=$(echo "$UPLOAD_RESPONSE" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
             
-            # Upload to transfer.sh as backup
-            echo "📤 Uploading to transfer.sh..."
+            # Upload to transfer.sh
             TRANSFER_LINK=$(curl --upload-file "../$NEW_NAME" https://transfer.sh/$NEW_NAME)
             
-            # Create download summary
-            cat > ../SUCCESS_DOWNLOAD.txt << EOF
-          🎉🎉🎉 UNTOLD APP BUILD SUCCESSFUL! 🎉🎉🎉
+            cat > ../FINAL_SUCCESS.txt << EOF
+          🎉🎉🎉 UNTOLD APP - FINALLY BUILT! 🎉🎉🎉
           
           📱 APK: $NEW_NAME
-          📊 Size: $APK_SIZE
+          📊 Size: $APK_SIZE  
           📅 Built: $(date)
+          🔧 Fixed: Hermes configuration issues
           
-          📥 DOWNLOAD LINKS:
+          📥 DOWNLOAD YOUR APK:
           Primary: $DOWNLOAD_LINK
           Backup:  $TRANSFER_LINK
           
-          📱 TO INSTALL:
-          1. Download APK using either link above
-          2. Enable "Unknown sources" on Android
+          📱 INSTALL INSTRUCTIONS:
+          1. Download APK using links above
+          2. Enable "Unknown sources" in Android settings
           3. Install the APK file
           4. Launch Untold App!
           
-          🚀 ENJOY YOUR APP! 🚀
+          🚀 CONGRATULATIONS! YOUR APP IS READY! 🚀
           EOF
             
             echo ""
             echo "=================================================="
-            cat ../SUCCESS_DOWNLOAD.txt
+            cat ../FINAL_SUCCESS.txt
             echo "=================================================="
             
           else
-            echo "❌ No APK file found after build!"
-            echo "Checking build outputs:"
-            find . -path "*/outputs/*" -type f 2>/dev/null || echo "No output files found"
+            echo "❌ Build failed - no APK generated"
+            echo "Checking gradle logs..."
+            find . -name "*.log" -exec tail -20 {} \;
           fi
     
     artifacts:
       - "*.apk"
-      - SUCCESS_DOWNLOAD.txt
+      - FINAL_SUCCESS.txt
     
     publishing:
       email:
