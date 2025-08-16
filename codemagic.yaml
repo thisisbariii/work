@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Cloud Upload APK
+    name: Hermes Fix Build
     max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
@@ -16,7 +16,7 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Quick setup and build
+      - name: Quick setup
         script: |
           npm cache clean --force
           npm install
@@ -32,7 +32,16 @@ workflows:
                 "package": "com.untold.shareapp",
                 "versionCode": 1
               },
-              "plugins": []
+              "plugins": [
+                [
+                  "expo-build-properties",
+                  {
+                    "android": {
+                      "enableHermes": true
+                    }
+                  }
+                ]
+              ]
             }
           }
           EOF
@@ -73,22 +82,50 @@ workflows:
           EOF
           
           rm -rf app/ android ios .expo
-          npx expo prebuild --platform android --clean --no-install
       
-      - name: Build and upload APK
+      - name: Prebuild and fix Hermes
         script: |
+          npx expo prebuild --platform android --clean --no-install
+          
           cd android
           
+          echo "=== Fixing Hermes configuration in app/build.gradle ==="
+          # Fix the hermesEnabled property issue
+          sed -i.bak 's/hermesEnabled/enableHermes/g' app/build.gradle
+          
+          # Also ensure Hermes is properly defined
+          sed -i.bak '/enableHermes.*=/d' app/build.gradle
+          sed -i.bak '/project.ext.react/a\
+          def enableHermes = project.ext.react.get("enableHermes", true)' app/build.gradle
+          
+          echo "=== Checking app/build.gradle for Hermes references ==="
+          grep -n -A 5 -B 5 "ermes" app/build.gradle || echo "No Hermes references found"
+          
+          echo "=== Setting up gradle.properties ==="
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m
           android.useAndroidX=true
           android.enableJetifier=true
           kotlin.version=1.8.22
+          
+          # React Native specific
+          FLIPPER_VERSION=0.201.0
+          reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64
+          newArchEnabled=false
+          hermesEnabled=true
           EOF
           
           chmod +x ./gradlew
+      
+      - name: Build and upload APK
+        script: |
+          cd android
+          
+          echo "=== Cleaning project ==="
           ./gradlew clean
-          ./gradlew assembleDebug --stacktrace
+          
+          echo "=== Building debug APK ==="
+          ./gradlew assembleDebug --stacktrace --info
           
           echo "=== Searching for APK ==="
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
@@ -103,56 +140,55 @@ workflows:
             NEW_NAME="UntoldApp_${TIMESTAMP}.apk"
             cp "$APK_FILE" "../$NEW_NAME"
             
-            echo "=== Uploading to file.io ==="
+            echo "=== Uploading to cloud services ==="
+            
+            # Upload to file.io
+            echo "📤 Uploading to file.io..."
             UPLOAD_RESPONSE=$(curl -F "file=@../$NEW_NAME" https://file.io)
-            echo "📤 Upload Response: $UPLOAD_RESPONSE"
+            echo "Upload Response: $UPLOAD_RESPONSE"
             
             # Extract download link
             DOWNLOAD_LINK=$(echo "$UPLOAD_RESPONSE" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
-            echo "🔗 Download Link: $DOWNLOAD_LINK"
             
-            # Also try uploading to transfer.sh as backup
-            echo "=== Backup upload to transfer.sh ==="
+            # Upload to transfer.sh as backup
+            echo "📤 Uploading to transfer.sh..."
             TRANSFER_LINK=$(curl --upload-file "../$NEW_NAME" https://transfer.sh/$NEW_NAME)
-            echo "🔗 Backup Link: $TRANSFER_LINK"
             
-            # Create summary file
-            cat > ../download_links.txt << EOF
-          ===================================
-          🎉 UNTOLD APP - BUILD SUCCESSFUL! 🎉
-          ===================================
+            # Create download summary
+            cat > ../SUCCESS_DOWNLOAD.txt << EOF
+          🎉🎉🎉 UNTOLD APP BUILD SUCCESSFUL! 🎉🎉🎉
           
-          📱 APK Name: $NEW_NAME
-          📊 APK Size: $APK_SIZE
-          📅 Build Date: $(date)
+          📱 APK: $NEW_NAME
+          📊 Size: $APK_SIZE
+          📅 Built: $(date)
           
           📥 DOWNLOAD LINKS:
-          
           Primary: $DOWNLOAD_LINK
           Backup:  $TRANSFER_LINK
           
-          📱 INSTALLATION INSTRUCTIONS:
-          1. Download the APK file
-          2. Enable "Install from unknown sources" on your Android device
-          3. Install the APK
-          4. Enjoy your Untold app! 🚀
+          📱 TO INSTALL:
+          1. Download APK using either link above
+          2. Enable "Unknown sources" on Android
+          3. Install the APK file
+          4. Launch Untold App!
           
-          ===================================
+          🚀 ENJOY YOUR APP! 🚀
           EOF
             
-            echo "=== DOWNLOAD LINKS CREATED ==="
-            cat ../download_links.txt
+            echo ""
+            echo "=================================================="
+            cat ../SUCCESS_DOWNLOAD.txt
+            echo "=================================================="
             
           else
-            echo "❌ No APK file found!"
-            find . -type f -name "*.apk"
-            echo "Build outputs:"
-            find . -path "*/outputs/*" -type f
+            echo "❌ No APK file found after build!"
+            echo "Checking build outputs:"
+            find . -path "*/outputs/*" -type f 2>/dev/null || echo "No output files found"
           fi
     
     artifacts:
       - "*.apk"
-      - download_links.txt
+      - SUCCESS_DOWNLOAD.txt
     
     publishing:
       email:
