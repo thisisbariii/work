@@ -1,7 +1,7 @@
 workflows:
   react-native-android:
-    name: Nuclear Fix - Replace build.gradle
-    max_build_duration: 120
+    name: Simple Working Build
+    max_build_duration: 60
     instance_type: mac_mini_m1
     triggering:
       events:
@@ -16,220 +16,74 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Setup and prebuild
+      - name: Build APK
         script: |
-          npm cache clean --force
-          npm install
           npm install -g @expo/cli@latest
           
-          # Minimal app.json
-          cat > app.json << 'EOF'
+          cat > package.json << 'EOF'
           {
-            "expo": {
-              "name": "UntoldApp",
-              "slug": "untold-app",
-              "version": "1.0.0",
-              "android": {
-                "package": "com.untold.shareapp",
-                "versionCode": 1
-              },
-              "plugins": []
+            "name": "untold",
+            "version": "1.0.0",
+            "main": "App.js",
+            "dependencies": {
+              "expo": "~51.0.28",
+              "react": "18.2.0",
+              "react-native": "0.74.5"
             }
           }
           EOF
           
-          # Simple App.tsx
-          cat > App.tsx << 'EOF'
+          cat > App.js << 'EOF'
           import React from 'react';
-          import { Text, View, StyleSheet } from 'react-native';
+          import { Text, View } from 'react-native';
           
           export default function App() {
             return (
-              <View style={styles.container}>
-                <Text style={styles.text}>🎉 Untold App 🎉</Text>
-                <Text style={styles.subtitle}>Built successfully!</Text>
+              <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#667eea'}}>
+                <Text style={{fontSize: 24, color: 'white', fontWeight: 'bold'}}>Untold App</Text>
               </View>
             );
           }
-          
-          const styles = StyleSheet.create({
-            container: {
-              flex: 1,
-              justifyContent: 'center',
-              alignItems: 'center',
-              backgroundColor: '#667eea',
-            },
-            text: {
-              fontSize: 24,
-              fontWeight: 'bold',
-              color: 'white',
-              textAlign: 'center',
-              marginBottom: 20,
-            },
-            subtitle: {
-              fontSize: 16,
-              color: 'white',
-              textAlign: 'center',
-            },
-          });
           EOF
           
-          rm -rf app/ android ios .expo
-          npx expo prebuild --platform android --clean --no-install
-      
-      - name: Nuclear fix - Replace app/build.gradle completely
-        script: |
+          cat > app.json << 'EOF'
+          {
+            "expo": {
+              "name": "Untold",
+              "slug": "untold",
+              "version": "1.0.0",
+              "android": {
+                "package": "com.untold.app"
+              }
+            }
+          }
+          EOF
+          
+          npm install
+          npx expo prebuild --platform android --clean
+          
           cd android
+          chmod +x gradlew
           
-          echo "=== Original app/build.gradle causing issues ==="
-          echo "Lines around error (line 172):"
-          sed -n '165,180p' app/build.gradle || echo "Cannot show lines"
-          
-          echo "=== Replacing entire app/build.gradle ==="
-          cat > app/build.gradle << 'EOF'
-          apply plugin: "com.android.application"
-          apply plugin: "org.jetbrains.kotlin.android"
-          apply plugin: "com.facebook.react"
-          
-          def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
-          
-          android {
-              ndkVersion rootProject.ext.ndkVersion
-              compileSdk rootProject.ext.compileSdkVersion
-              
-              namespace 'com.untold.shareapp'
-              
-              defaultConfig {
-                  applicationId 'com.untold.shareapp'
-                  minSdk rootProject.ext.minSdkVersion
-                  targetSdk rootProject.ext.targetSdkVersion
-                  versionCode 1
-                  versionName "1.0.0"
-              }
-              
-              signingConfigs {
-                  debug {
-                      storeFile file('debug.keystore')
-                      storePassword 'android'
-                      keyAlias 'androiddebugkey'
-                      keyPassword 'android'
-                  }
-              }
-              
-              buildTypes {
-                  debug {
-                      signingConfig signingConfigs.debug
-                  }
-                  release {
-                      signingConfig signingConfigs.debug
-                      minifyEnabled false
-                      proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-                  }
-              }
-          }
-          
-          dependencies {
-              implementation("com.facebook.react:react-android")
-              implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.0.0")
-              debugImplementation("com.facebook.flipper:flipper:0.201.0")
-              debugImplementation("com.facebook.flipper:flipper-network-plugin:0.201.0")
-              debugImplementation("com.facebook.flipper:flipper-fresco-plugin:0.201.0")
-              
-              if (hermesEnabled.toBoolean()) {
-                  implementation("com.facebook.react:hermes-android")
-              } else {
-                  implementation jscFlavor
-              }
-          }
-          
-          apply from: new File(["node", "--print", "require.resolve('@react-native/gradle-plugin/package.json')"].execute(null, rootDir).text.trim(), "../src/main/groovy/on-after-evaluate.gradle")
-          EOF
-          
-          echo "=== Setting up gradle.properties ==="
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m
           android.useAndroidX=true
           android.enableJetifier=true
-          kotlin.version=1.8.22
-          
-          # React Native
-          FLIPPER_VERSION=0.201.0
-          reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64
-          newArchEnabled=false
-          hermesEnabled=true
           EOF
           
-          # Also fix root build.gradle if needed
-          if grep -q "kotlin.*1.9.24" build.gradle; then
-            sed -i.bak 's/kotlin.*version.*"1.9.24"/kotlin("android") version "1.8.22"/g' build.gradle
-          fi
+          ./gradlew assembleDebug
           
-          chmod +x ./gradlew
-      
-      - name: Build and upload APK
-        script: |
-          cd android
-          
-          echo "=== Building APK ==="
-          ./gradlew clean
-          ./gradlew assembleDebug --stacktrace --debug
-          
-          echo "=== Searching for APK ==="
-          APK_FILE=$(find . -name "*.apk" -type f | head -1)
-          
-          if [ -n "$APK_FILE" ]; then
-            echo "✅ SUCCESS! Found APK: $APK_FILE"
-            APK_SIZE=$(ls -lh "$APK_FILE" | awk '{print $5}')
-            echo "📱 APK Size: $APK_SIZE"
-            
-            TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-            NEW_NAME="UntoldApp_FIXED_${TIMESTAMP}.apk"
-            cp "$APK_FILE" "../$NEW_NAME"
-            
-            echo "🚀 Uploading to cloud..."
-            
-            # Upload to file.io
-            UPLOAD_RESPONSE=$(curl -F "file=@../$NEW_NAME" https://file.io)
-            DOWNLOAD_LINK=$(echo "$UPLOAD_RESPONSE" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
-            
-            # Upload to transfer.sh
-            TRANSFER_LINK=$(curl --upload-file "../$NEW_NAME" https://transfer.sh/$NEW_NAME)
-            
-            cat > ../FINAL_SUCCESS.txt << EOF
-          🎉🎉🎉 UNTOLD APP - FINALLY BUILT! 🎉🎉🎉
-          
-          📱 APK: $NEW_NAME
-          📊 Size: $APK_SIZE  
-          📅 Built: $(date)
-          🔧 Fixed: Hermes configuration issues
-          
-          📥 DOWNLOAD YOUR APK:
-          Primary: $DOWNLOAD_LINK
-          Backup:  $TRANSFER_LINK
-          
-          📱 INSTALL INSTRUCTIONS:
-          1. Download APK using links above
-          2. Enable "Unknown sources" in Android settings
-          3. Install the APK file
-          4. Launch Untold App!
-          
-          🚀 CONGRATULATIONS! YOUR APP IS READY! 🚀
-          EOF
-            
-            echo ""
-            echo "=================================================="
-            cat ../FINAL_SUCCESS.txt
-            echo "=================================================="
-            
+          APK=$(find . -name "*.apk" | head -1)
+          if [ -n "$APK" ]; then
+            cp "$APK" ../app.apk
+            echo "APK created: app.apk"
+            curl --upload-file ../app.apk https://transfer.sh/app.apk
           else
-            echo "❌ Build failed - no APK generated"
-            echo "Checking gradle logs..."
-            find . -name "*.log" -exec tail -20 {} \;
+            echo "No APK found"
           fi
     
     artifacts:
-      - "*.apk"
-      - FINAL_SUCCESS.txt
+      - app.apk
     
     publishing:
       email:
