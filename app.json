@@ -53,8 +53,7 @@
             "enableShrinkResourcesInReleaseBuilds": true,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "minSdkVersion": 24,
-            "kotlinVersion": "1.9.24"
+            "minSdkVersion": 24
           }
         }
       ]

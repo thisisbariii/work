@@ -21,7 +21,7 @@ workflows:
           echo "Checking project structure..."
           ls -la
           cat package.json | head -20
-          cat app.json | head -20
+          cat app.json | head -30
       
       - name: Install dependencies
         script: |
@@ -36,16 +36,38 @@ workflows:
         script: |
           rm -rf android ios .expo
       
+      - name: Fix app.json before prebuild
+        script: |
+          echo "Original app.json content:"
+          cat app.json
+          # Remove the kotlinVersion line completely
+          sed -i.bak 's/"kotlinVersion": "1.9.24",//g' app.json
+          sed -i.bak 's/"kotlinVersion": "1.9.24"//g' app.json
+          echo "Modified app.json content:"
+          cat app.json
+      
       - name: Prebuild Android
         script: |
           npx expo prebuild --platform android --clean --no-install
       
-      - name: Fix Kotlin version manually
+      - name: Force Kotlin version in Gradle
         script: |
           cd android
-          echo "kotlin.version=1.9.24" >> gradle.properties
+          # Add Kotlin version to gradle.properties
+          echo "kotlin.version=1.9.10" >> gradle.properties
           echo "android.defaults.buildfeatures.buildconfig=true" >> gradle.properties
           echo "android.nonTransitiveRClass=false" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+          echo "android.useAndroidX=true" >> gradle.properties
+          
+          # Force Kotlin version in root build.gradle
+          sed -i.bak 's/kotlin("android") version "1.9.24"/kotlin("android") version "1.9.10"/g' build.gradle
+          sed -i.bak 's/kotlin_version = "1.9.24"/kotlin_version = "1.9.10"/g' build.gradle
+          
+          echo "Modified gradle.properties:"
+          cat gradle.properties
+          echo "Modified build.gradle:"
+          cat build.gradle | head -50
       
       - name: Set Gradle permissions
         script: |
