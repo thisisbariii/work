@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Email APK Delivery
+    name: Cloud Upload APK
     max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
@@ -16,7 +16,7 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Setup and build
+      - name: Quick setup and build
         script: |
           npm cache clean --force
           npm install
@@ -44,7 +44,8 @@ workflows:
           export default function App() {
             return (
               <View style={styles.container}>
-                <Text style={styles.text}>Welcome to Untold App!</Text>
+                <Text style={styles.text}>🎉 Untold App - Share & Heal 🎉</Text>
+                <Text style={styles.subtitle}>Your journey starts here!</Text>
               </View>
             );
           }
@@ -54,22 +55,30 @@ workflows:
               flex: 1,
               justifyContent: 'center',
               alignItems: 'center',
-              backgroundColor: '#fff',
+              backgroundColor: '#667eea',
             },
             text: {
-              fontSize: 18,
+              fontSize: 24,
               fontWeight: 'bold',
+              color: 'white',
+              textAlign: 'center',
+              marginBottom: 20,
+            },
+            subtitle: {
+              fontSize: 16,
+              color: 'white',
+              textAlign: 'center',
             },
           });
           EOF
           
           rm -rf app/ android ios .expo
+          npx expo prebuild --platform android --clean --no-install
       
       - name: Build and upload APK
         script: |
-          npx expo prebuild --platform android --clean --no-install
-          
           cd android
+          
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m
           android.useAndroidX=true
@@ -81,24 +90,69 @@ workflows:
           ./gradlew clean
           ./gradlew assembleDebug --stacktrace
           
-          echo "=== Finding and uploading APK ==="
+          echo "=== Searching for APK ==="
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
+          
           if [ -n "$APK_FILE" ]; then
-            echo "Found APK: $APK_FILE"
+            echo "✅ Found APK: $APK_FILE"
+            APK_SIZE=$(ls -lh "$APK_FILE" | awk '{print $5}')
+            echo "📱 APK Size: $APK_SIZE"
             
-            # Upload to a temporary file sharing service
-            curl -F "file=@$APK_FILE" https://file.io | tee upload_result.txt
+            # Rename APK with timestamp
+            TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+            NEW_NAME="UntoldApp_${TIMESTAMP}.apk"
+            cp "$APK_FILE" "../$NEW_NAME"
             
-            echo "=== APK uploaded successfully ==="
-            cat upload_result.txt
+            echo "=== Uploading to file.io ==="
+            UPLOAD_RESPONSE=$(curl -F "file=@../$NEW_NAME" https://file.io)
+            echo "📤 Upload Response: $UPLOAD_RESPONSE"
+            
+            # Extract download link
+            DOWNLOAD_LINK=$(echo "$UPLOAD_RESPONSE" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
+            echo "🔗 Download Link: $DOWNLOAD_LINK"
+            
+            # Also try uploading to transfer.sh as backup
+            echo "=== Backup upload to transfer.sh ==="
+            TRANSFER_LINK=$(curl --upload-file "../$NEW_NAME" https://transfer.sh/$NEW_NAME)
+            echo "🔗 Backup Link: $TRANSFER_LINK"
+            
+            # Create summary file
+            cat > ../download_links.txt << EOF
+          ===================================
+          🎉 UNTOLD APP - BUILD SUCCESSFUL! 🎉
+          ===================================
+          
+          📱 APK Name: $NEW_NAME
+          📊 APK Size: $APK_SIZE
+          📅 Build Date: $(date)
+          
+          📥 DOWNLOAD LINKS:
+          
+          Primary: $DOWNLOAD_LINK
+          Backup:  $TRANSFER_LINK
+          
+          📱 INSTALLATION INSTRUCTIONS:
+          1. Download the APK file
+          2. Enable "Install from unknown sources" on your Android device
+          3. Install the APK
+          4. Enjoy your Untold app! 🚀
+          
+          ===================================
+          EOF
+            
+            echo "=== DOWNLOAD LINKS CREATED ==="
+            cat ../download_links.txt
+            
           else
-            echo "No APK file found!"
-            find . -name "*.apk" -type f
+            echo "❌ No APK file found!"
+            find . -type f -name "*.apk"
+            echo "Build outputs:"
+            find . -path "*/outputs/*" -type f
           fi
     
     artifacts:
-      - "**/*.apk"
-      - upload_result.txt
+      - "*.apk"
+      - download_links.txt
     
     publishing:
       email:
