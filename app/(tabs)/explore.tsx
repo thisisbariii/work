@@ -19,34 +19,52 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { FirebaseService } from '@/services/firebaseService';
 import { Post, EmotionType } from '@/types';
-import {
-  emotionColors,
-  emotionLabels,
-  getRandomMotivationalQuote,
-} from '@/utils/emotions';
-import { Heart, MessageCircle, Sparkles, Clock, Pin, Send } from 'lucide-react-native';
+import { Heart, MessageCircle, Sparkles, Clock, Pin, Send, MapPin } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { getCurrentUserId } from '@/utils/anonymousAuth';
 
 const { width, height } = Dimensions.get('window');
 
+// Updated emotions array with new tags only
 const emotions: EmotionType[] = [
-  'sad',
-  'angry', 
-  'anxious',
-  'guilty',
-  'happy',
-  'empty',
+  'chaotic',
+  'overthinking', 
+  'drained',
+  'vibing',
+  'frustrated',
+  'contemplating',
+  'excited',
+  'nostalgic',
 ];
 
-// Refined minimal emotion theme
+// Updated emotion theme with only new emotions
 const emotionTheme = {
-  sad: { color: '#6366f1', bg: '#f8fafc', light: '#e0e7ff' },
-  angry: { color: '#ef4444', bg: '#fef2f2', light: '#fee2e2' },
-  anxious: { color: '#f59e0b', bg: '#fffbeb', light: '#fef3c7' },
-  guilty: { color: '#8b5cf6', bg: '#faf5ff', light: '#ede9fe' },
-  happy: { color: '#10b981', bg: '#f0fdf4', light: '#d1fae5' },
-  empty: { color: '#06b6d4', bg: '#f0f9ff', light: '#cffafe' },
+  chaotic: { color: '#ef4444', bg: '#fef2f2', light: '#fee2e2', label: 'Chaotic', emoji: '🌪️' },
+  overthinking: { color: '#f59e0b', bg: '#fffbeb', light: '#fef3c7', label: 'Overthinking', emoji: '🧠' },
+  drained: { color: '#6366f1', bg: '#f0f4ff', light: '#e0e7ff', label: 'Drained', emoji: '🔋' },
+  vibing: { color: '#10b981', bg: '#f0fdf4', light: '#d1fae5', label: 'Vibing', emoji: '✨' },
+  frustrated: { color: '#8b5cf6', bg: '#faf5ff', light: '#f3e8ff', label: 'Frustrated', emoji: '😤' },
+  contemplating: { color: '#6b7280', bg: '#f9fafb', light: '#f3f4f6', label: 'Contemplating', emoji: '💭' },
+  excited: { color: '#f97316', bg: '#fff7ed', light: '#fed7aa', label: 'Excited', emoji: '🚀' },
+  nostalgic: { color: '#ec4899', bg: '#fdf2f8', light: '#fce7f3', label: 'Nostalgic', emoji: '🌅' },
+};
+
+// Motivational quotes updated for new emotions
+const motivationalQuotes = [
+  "Every feeling is valid and temporary 💙",
+  "You're stronger than you think ✨",
+  "This moment doesn't define you 🌱",
+  "Your emotions are your strength 💪",
+  "Healing isn't linear, and that's okay 🌊",
+  "You belong here, exactly as you are 🤗",
+  "Small steps still count as progress 👣",
+  "Your story matters 📖",
+  "Tomorrow is a new opportunity 🌅",
+  "You're not alone in this feeling 🫂",
+];
+
+const getRandomMotivationalQuote = () => {
+  return motivationalQuotes[Math.floor(Math.random() * motivationalQuotes.length)];
 };
 
 export default function ExploreScreen() {
@@ -69,10 +87,28 @@ export default function ExploreScreen() {
   // Long press menu states
   const [showMenu, setShowMenu] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });;
   
+  // ✅ NEW: Location state
+  const [userLocation, setUserLocation] = useState<string | null>(null);
+
   // Pinned posts state
   const [pinnedPosts, setPinnedPosts] = useState<Set<string>>(new Set());
+
+  // ✅ NEW: Load user location
+  useEffect(() => {
+    const loadUserLocation = async () => {
+      try {
+        const location = await FirebaseService.getCurrentLocation();
+        if (location) {
+          setUserLocation(`${location.city}, ${location.state}`);
+        }
+      } catch (error) {
+        console.log('Could not load location');
+      }
+    };
+    loadUserLocation();
+  }, []);
 
   useEffect(() => {
     loadPosts();
@@ -107,9 +143,11 @@ export default function ExploreScreen() {
     }
   };
 
+  // ✅ UPDATED: Use location-based posts
   const loadPosts = async () => {
     try {
-      const fetchedPosts = await FirebaseService.getPosts();
+      // Use location-based posts instead of regular posts
+      const fetchedPosts = await FirebaseService.getPostsWithLocation();
       const filteredPosts = filter 
         ? fetchedPosts.filter((post) => post.emotionTag === filter) 
         : fetchedPosts;
@@ -296,7 +334,7 @@ export default function ExploreScreen() {
     if (!selectedPost) return;
     
     try {
-      const shareText = `"${selectedPost.text}"\n\n- Shared from Emotional Connect App`;
+      const shareText = `"${selectedPost.text}"\n\n- Shared from Unfold App`;
       
       // Try to open WhatsApp directly
       const whatsappURL = `whatsapp://send?text=${encodeURIComponent(shareText)}`;
@@ -315,7 +353,7 @@ export default function ExploreScreen() {
     } catch (error) {
       // Fallback to native share
       try {
-        const shareText = `"${selectedPost.text}"\n\n- Shared from Emotional Connect App`;
+        const shareText = `"${selectedPost.text}"\n\n- Shared from Unfold App`;
         await Share.share({
           message: shareText,
           title: 'Share Post',
@@ -341,11 +379,13 @@ export default function ExploreScreen() {
   // Combine them with pinned posts first
   const sortedPosts = [...pinnedPostsData, ...regularPostsData];
 
+  // ✅ UPDATED: renderPost with location indicator
   const renderPost = ({ item, isPinned = false }: { item: Post; isPinned?: boolean }) => {
     const isLiked = likedPosts.has(item.id);
     const isLiking = likingPosts.has(item.id);
     const isChatLoading = chatLoadingPosts.has(item.id);
-    const emotion = emotionTheme[item.emotionTag];
+    // Use contemplating as fallback for old posts that might not match new emotions
+    const emotion = emotionTheme[item.emotionTag] || emotionTheme.contemplating;
     const isProcessing = processingLikes.has(item.id) || isLiking;
     
     return (
@@ -375,14 +415,22 @@ export default function ExploreScreen() {
           </View>
         )}
 
-        {/* Ultra-minimal emotion indicator */}
+        {/* Enhanced emotion indicator with emoji */}
         <View style={styles.postHeader}>
           <View style={[styles.emotionIndicator, { backgroundColor: emotion.light }]}>
-            <View style={[styles.emotionDot, { backgroundColor: emotion.color }]} />
+            <Text style={styles.emotionEmoji}>{emotion.emoji}</Text>
           </View>
           <Text style={[styles.emotionLabel, { color: emotion.color }]}>
-            {emotionLabels[item.emotionTag]}
+            {emotion.label}
           </Text>
+          
+          {/* ✅ NEW: Location indicator */}
+          {item.isLocal && (
+            <View style={[styles.localIndicator, { backgroundColor: colors.primary + '20' }]}>
+              <Text style={[styles.localText, { color: colors.primary }]}>📍 Near you</Text>
+            </View>
+          )}
+          
           <View style={styles.spacer} />
           <Text style={[styles.timeText, { color: colors.text + '40' }]}>
             {formatTime(item.timestamp)}
@@ -394,7 +442,7 @@ export default function ExploreScreen() {
           {item.text}
         </Text>
 
-        {/* Minimal actions bar */}
+        {/* Enhanced actions bar */}
         <View style={[styles.postActions, { borderTopColor: colors.border }]}>
           <TouchableOpacity 
             style={[
@@ -449,19 +497,33 @@ export default function ExploreScreen() {
     );
   };
 
+  // ✅ UPDATED: renderHeader with location info
   const renderHeader = () => (
     <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-      {/* Ultra-minimal title */}
+      {/* Clean title with location */}
       <View style={styles.titleSection}>
         <Text style={[styles.title, { color: colors.text }]}>
           Explore
         </Text>
         <Text style={[styles.subtitle, { color: colors.text + '50' }]}>
-          Connect through shared feelings
+          {userLocation 
+            ? `Stories from ${userLocation} and beyond` 
+            : 'Connect through shared feelings'
+          }
         </Text>
       </View>
 
-      {/* Clean filter pills */}
+      {/* ✅ NEW: Location info banner */}
+      {userLocation && (
+        <View style={[styles.locationBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <MapPin size={14} color={colors.primary} />
+          <Text style={[styles.locationText, { color: colors.text + '70' }]}>
+            Showing posts from your area and other places
+          </Text>
+        </View>
+      )}
+
+      {/* Updated filter pills with new emotions */}
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
@@ -503,11 +565,12 @@ export default function ExploreScreen() {
               onPress={() => setFilter(emotion)}
               activeOpacity={0.7}
             >
+              <Text style={styles.filterEmoji}>{theme.emoji}</Text>
               <Text style={[
                 styles.filterText,
                 { color: isSelected ? 'white' : colors.text + '70' }
               ]}>
-                {emotionLabels[emotion]}
+                {theme.label}
               </Text>
             </TouchableOpacity>
           );
@@ -634,7 +697,7 @@ export default function ExploreScreen() {
               <MessageCircle size={24} color={colors.text + '40'} />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>
-              {filter ? `No ${emotionLabels[filter]} stories yet` : 'No stories to explore'}
+              {filter ? `No ${emotionTheme[filter]?.label || 'filtered'} stories yet` : 'No stories to explore'}
             </Text>
             <Text style={[styles.emptySubtext, { color: colors.text + '50' }]}>
               Be the first to share your feelings and connect with others
@@ -710,7 +773,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   titleSection: {
-    marginBottom: 32,
+    marginBottom: 20,
   },
   title: {
     fontSize: 28,
@@ -724,6 +787,22 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   
+  // ✅ NEW: Location banner styles
+  locationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 20,
+    gap: 8,
+  },
+  locationText: {
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  
   // Refined filter pills
   filtersContainer: {
     marginBottom: 8,
@@ -733,13 +812,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
     marginRight: 8,
     minWidth: 50,
-    alignItems: 'center',
   },
   activeFilter: {
     shadowColor: '#000',
@@ -751,7 +831,10 @@ const styles = StyleSheet.create({
   filterText: {
     fontSize: 13,
     fontWeight: '600',
-    textTransform: 'capitalize',
+    marginLeft: 4,
+  },
+  filterEmoji: {
+    fontSize: 14,
   },
   
   // Content
@@ -796,17 +879,15 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   emotionIndicator: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 12,
   },
-  emotionDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  emotionEmoji: {
+    fontSize: 16,
   },
   emotionLabel: {
     fontSize: 12,
@@ -814,6 +895,19 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
     letterSpacing: 0.2,
   },
+  
+  // ✅ NEW: Local post indicator styles
+  localIndicator: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  localText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  
   spacer: {
     flex: 1,
   },
@@ -919,4 +1013,4 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     maxWidth: 280,
   },
-});
+})

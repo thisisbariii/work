@@ -14,24 +14,58 @@ workflows:
       groups:
         - env
       node: 18
+      java: 17
     scripts:
+      - name: Check files
+        script: |
+          echo "Checking project structure..."
+          ls -la
+          cat package.json | head -20
+          cat app.json | head -20
+      
       - name: Install dependencies
         script: |
+          npm cache clean --force
           npm ci
+      
       - name: Install Expo CLI
         script: |
-          npm install -g @expo/cli
-      - name: Expo prebuild
+          npm install -g @expo/cli@latest
+      
+      - name: Remove old builds
         script: |
-          npx expo prebuild --platform android --clean
-      - name: Build Android APK
+          rm -rf android ios .expo
+      
+      - name: Prebuild Android
+        script: |
+          npx expo prebuild --platform android --clean --no-install
+      
+      - name: Fix Kotlin version manually
+        script: |
+          cd android
+          echo "kotlin.version=1.9.24" >> gradle.properties
+          echo "android.defaults.buildfeatures.buildconfig=true" >> gradle.properties
+          echo "android.nonTransitiveRClass=false" >> gradle.properties
+      
+      - name: Set Gradle permissions
         script: |
           cd android
           chmod +x ./gradlew
-          ./gradlew assembleRelease
+      
+      - name: Clean Gradle
+        script: |
+          cd android
+          ./gradlew clean --stacktrace
+      
+      - name: Build Android APK
+        script: |
+          cd android
+          ./gradlew assembleRelease --no-daemon --stacktrace --info
+    
     artifacts:
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/mapping.txt
+    
     publishing:
       email:
         recipients:

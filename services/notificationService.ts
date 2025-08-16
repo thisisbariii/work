@@ -42,6 +42,37 @@ export class NotificationService {
   private static inAppNotifications: InAppNotification[] = [];
   private static listeners: ((notifications: InAppNotification[]) => void)[] = [];
 
+  // Privacy-friendly caring messages
+  private static readonly CARING_MESSAGES = [
+    'Someone who understands is reaching out to connect with you',
+    'You have support waiting - someone cares about your journey',
+    'A fellow soul wants to connect and offer support',
+    'Someone in the community is thinking of you',
+    'You\'re not alone - someone wants to share in your experience',
+    'A caring person has reached out to you',
+    'Someone who relates to your feelings wants to connect',
+    'You have a message from someone who cares',
+    'A supportive friend is reaching out to you',
+    'Someone wants to offer you comfort and understanding'
+  ];
+
+  private static readonly CARING_TITLES = [
+    'Someone cares 💙',
+    'You\'re supported 🤗',
+    'Connection awaits 💫',
+    'You matter ✨',
+    'Support is here 🌟',
+    'You\'re not alone 💝'
+  ];
+
+  private static getRandomCaringMessage(): string {
+    return this.CARING_MESSAGES[Math.floor(Math.random() * this.CARING_MESSAGES.length)];
+  }
+
+  private static getRandomCaringTitle(): string {
+    return this.CARING_TITLES[Math.floor(Math.random() * this.CARING_TITLES.length)];
+  }
+
   // Initialize notification service
   static async initialize(): Promise<void> {
     try {
@@ -91,7 +122,6 @@ export class NotificationService {
             allowCriticalAlerts: false,
             provideAppNotificationSettings: false,
             allowProvisional: false,
-            // Removed allowAnnouncements - this property doesn't exist in the type
           },
         });
         finalStatus = status;
@@ -172,7 +202,7 @@ export class NotificationService {
     });
   }
 
-  // Send message notification (for testing - in production, this would be server-side)
+  // Send message notification with privacy-friendly messages
   static async sendMessageNotification(
     toUserId: string,
     fromUserId: string,
@@ -184,13 +214,16 @@ export class NotificationService {
     try {
       const currentUserId = await getCurrentUserId();
       
-      // Don't send notification to yourself
-      if (toUserId === currentUserId) return;
+      // 🔧 FIX: Don't send notification if YOU are the sender
+      if (fromUserId === currentUserId) return;
+
+      const caringTitle = this.getRandomCaringTitle();
+      const caringMessage = this.getRandomCaringMessage();
 
       // Create in-app notification immediately
       await this.createInAppNotification({
-        title: 'New Message 💬',
-        message: `Someone sent you a message: "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}"`,
+        title: caringTitle,
+        message: caringMessage,
         type: 'message',
         data: {
           type: 'message',
@@ -205,7 +238,7 @@ export class NotificationService {
 
       // For mobile, schedule local notification (in production, use push notifications)
       if (Platform.OS !== 'web') {
-        await this.scheduleLocalMessageNotification(messageText, {
+        await this.scheduleLocalMessageNotification(caringTitle, caringMessage, {
           type: 'message',
           postId,
           chatId,
@@ -216,19 +249,15 @@ export class NotificationService {
         });
       } else {
         // For web, show browser notification
-        await this.showWebNotification(
-          'New Message 💬',
-          `Someone sent you a message: "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}"`,
-          {
-            type: 'message',
-            postId,
-            chatId,
-            fromUserId,
-            toUserId,
-            messageText,
-            postText,
-          }
-        );
+        await this.showWebNotification(caringTitle, caringMessage, {
+          type: 'message',
+          postId,
+          chatId,
+          fromUserId,
+          toUserId,
+          messageText,
+          postText,
+        });
       }
 
     } catch (error) {
@@ -238,14 +267,15 @@ export class NotificationService {
 
   // Schedule local notification for messages
   private static async scheduleLocalMessageNotification(
-    messageText: string,
+    title: string,
+    message: string,
     data: MessageNotificationData
   ): Promise<void> {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'New Message 💬',
-          body: `Someone sent you a message: "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}"`,
+          title: title,
+          body: message,
           sound: true,
           // Convert to Record<string, unknown> to satisfy Expo's type requirements
           data: data as unknown as Record<string, unknown>,

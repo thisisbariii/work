@@ -1,69 +1,99 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { FirebaseService } from '@/services/firebaseService';
 import { EmotionType } from '@/types';
-import { ArrowLeft, Send, MessageCircle, Heart } from 'lucide-react-native';
+import { ArrowLeft, Send, MessageCircle, Heart, Clock, MapPin } from 'lucide-react-native';
 
 const MAX_CHARS = 500;
+const QUICK_VENT_TIMER = 30; // 30 seconds for quick vent
 
-// Gentle, minimal emotion colors
+// Updated: More relatable, Gen Z-friendly emotion tags
 const emotionTheme = {
-  sad: { 
-    bg: '#f0f4ff', 
-    border: '#e0e7ff', 
-    accent: '#6366f1',
-    label: 'Sad'
-  },
-  angry: { 
+  chaotic: { 
     bg: '#fef2f2', 
     border: '#fee2e2', 
     accent: '#ef4444',
-    label: 'Angry'
+    label: 'Chaotic',
+    emoji: '🌪️'
   },
-  anxious: { 
+  overthinking: { 
     bg: '#fffbeb', 
     border: '#fef3c7', 
     accent: '#f59e0b',
-    label: 'Anxious'
+    label: 'Overthinking',
+    emoji: '🧠'
   },
-  guilty: { 
-    bg: '#faf5ff', 
-    border: '#f3e8ff', 
-    accent: '#8b5cf6',
-    label: 'Guilty'
+  drained: { 
+    bg: '#f0f4ff', 
+    border: '#e0e7ff', 
+    accent: '#6366f1',
+    label: 'Drained',
+    emoji: '🔋'
   },
-  happy: { 
+  vibing: { 
     bg: '#f0fdf4', 
     border: '#d1fae5', 
     accent: '#10b981',
-    label: 'Happy'
+    label: 'Vibing',
+    emoji: '✨'
   },
-  empty: { 
+  frustrated: { 
+    bg: '#faf5ff', 
+    border: '#f3e8ff', 
+    accent: '#8b5cf6',
+    label: 'Frustrated',
+    emoji: '😤'
+  },
+  contemplating: { 
     bg: '#f9fafb', 
     border: '#f3f4f6', 
     accent: '#6b7280',
-    label: 'Empty'
+    label: 'Contemplating',
+    emoji: '💭'
+  },
+  excited: { 
+    bg: '#fff7ed', 
+    border: '#fed7aa', 
+    accent: '#f97316',
+    label: 'Excited',
+    emoji: '🚀'
+  },
+  nostalgic: { 
+    bg: '#fdf2f8', 
+    border: '#fce7f3', 
+    accent: '#ec4899',
+    label: 'Nostalgic',
+    emoji: '🌅'
   },
 };
 
-// Gentle emotional prompts
+// Updated: More engaging prompts
 const emotionPrompts = {
-  sad: "Share what's weighing on your heart...",
-  angry: "Express what's stirring inside you...",
-  anxious: "Describe what's on your mind...",
-  guilty: "Share what you're carrying...",
-  happy: "Tell us what's bringing you joy...",
-  empty: "Share this quiet moment...",
+  chaotic: "What's the chaos in your world right now?",
+  overthinking: "What's been spinning in your mind lately?",
+  drained: "What's been taking your energy today?",
+  vibing: "Share what's making you feel good...",
+  frustrated: "What's not going the way you wanted?",
+  contemplating: "What deep thoughts are you having?",
+  excited: "What's got you pumped up right now?",
+  nostalgic: "What memory or feeling are you revisiting?",
 };
 
-// Simple local storage helper - replace AsyncStorage functionality
+// Quick vent specific prompts
+const quickVentPrompts = [
+  "What's on your mind right now?",
+  "What happened today?",
+  "How are you really feeling?",
+  "What do you need to get off your chest?",
+  "Share your current mood...",
+];
+
+// Simple local storage helper
 const storeLastPostDate = async (date: string) => {
   try {
-    // In a real app, you'd use AsyncStorage here
-    // For now, we'll just store in memory or handle differently
     console.log('Storing last post date:', date);
   } catch (error) {
     console.log('Error storing date:', error);
@@ -73,12 +103,82 @@ const storeLastPostDate = async (date: string) => {
 export default function ShareScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams();
+  
+  // Handle URL parameters
+  const preselectedMood = params.preselectedMood as EmotionType;
+  const isQuickVent = params.quickVent === 'true';
+  
   const [text, setText] = useState('');
-  const [selectedEmotion, setSelectedEmotion] = useState<EmotionType>('sad');
+  const [selectedEmotion, setSelectedEmotion] = useState<EmotionType>(
+    preselectedMood || 'chaotic'
+  );
   const [openForChat, setOpenForChat] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [quickVentTimer, setQuickVentTimer] = useState(QUICK_VENT_TIMER);
+  const [isQuickVentMode, setIsQuickVentMode] = useState(isQuickVent);
+  
+  // ✅ NEW: Location state
+  const [userLocation, setUserLocation] = useState<string | null>(null);
+  const [locationLoading, setLocationLoading] = useState(true);
 
-  const emotions: EmotionType[] = ['sad', 'angry', 'anxious', 'guilty', 'happy', 'empty'];
+  // Updated emotions array
+  const emotions: EmotionType[] = ['chaotic', 'overthinking', 'drained', 'vibing', 'frustrated', 'contemplating', 'excited', 'nostalgic'];
+
+  // ✅ NEW: Load user location on component mount
+  useEffect(() => {
+    const loadUserLocation = async () => {
+      try {
+        setLocationLoading(true);
+        const location = await FirebaseService.getCurrentLocation();
+        if (location) {
+          setUserLocation(`${location.city}, ${location.state}`);
+        }
+      } catch (error) {
+        console.log('Could not load location');
+      } finally {
+        setLocationLoading(false);
+      }
+    };
+    
+    loadUserLocation();
+  }, []);
+
+  // Quick vent timer effect
+  useEffect(() => {
+    let interval: any;
+    
+    if (isQuickVentMode && quickVentTimer > 0) {
+      interval = setInterval(() => {
+        setQuickVentTimer(prev => {
+          if (prev <= 1) {
+            // Time's up - auto submit if there's text
+            if (text.trim()) {
+              handleSubmit();
+            } else {
+              setIsQuickVentMode(false);
+              Alert.alert(
+                'Time\'s up!', 
+                'Take your time to share when you\'re ready.',
+                [{ text: 'Continue writing' }]
+              );
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isQuickVentMode, quickVentTimer, text]);
+
+  // Set random prompt for quick vent mode
+  const getQuickVentPrompt = () => {
+    return quickVentPrompts[Math.floor(Math.random() * quickVentPrompts.length)];
+  };
 
   const handleSubmit = async () => {
     if (!text.trim()) {
@@ -88,12 +188,13 @@ export default function ShareScreen() {
 
     setIsSubmitting(true);
     try {
-      // Create the post
+      // Create the post (location will be automatically added in FirebaseService)
       await FirebaseService.createPost(text.trim(), selectedEmotion, openForChat);
       
-      // Add mood entry automatically
+      // Updated emotion to intensity mapping
       const emotionToIntensity = {
-        'sad': 2, 'angry': 3, 'anxious': 4, 'guilty': 3, 'happy': 8, 'empty': 1
+        'chaotic': 3, 'overthinking': 4, 'drained': 2, 'vibing': 8, 
+        'frustrated': 3, 'contemplating': 5, 'excited': 9, 'nostalgic': 6
       };
       
       await FirebaseService.addMoodEntry(
@@ -105,9 +206,13 @@ export default function ShareScreen() {
       // Record last post date
       await storeLastPostDate(new Date().toDateString());
       
+      const successMessage = isQuickVentMode 
+        ? 'Quick vent shared! Sometimes getting it out fast is exactly what you need.' 
+        : 'Your feelings have been shared anonymously. Thank you for being brave and authentic.';
+      
       Alert.alert(
         'Shared with Care',
-        'Your feelings have been shared anonymously. Thank you for being brave and authentic.',
+        successMessage,
         [{ text: 'Continue', onPress: () => router.back() }]
       );
     } catch (error) {
@@ -122,6 +227,19 @@ export default function ShareScreen() {
 
   const currentTheme = emotionTheme[selectedEmotion];
 
+  // Get appropriate placeholder text
+  const getPlaceholder = () => {
+    if (isQuickVentMode) {
+      return getQuickVentPrompt();
+    }
+    return emotionPrompts[selectedEmotion];
+  };
+
+  // Format timer display
+  const formatTimer = (seconds: number) => {
+    return `0:${seconds.toString().padStart(2, '0')}`;
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header extending to top */}
@@ -134,53 +252,107 @@ export default function ShareScreen() {
           <ArrowLeft size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Share Feelings</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            {isQuickVentMode ? 'Quick Vent' : 'Share Feelings'}
+          </Text>
           <Text style={[styles.headerSubtitle, { color: colors.text + '50' }]}>
-            Safe • Anonymous • Supportive
+            {isQuickVentMode ? 'Fast & Anonymous' : 'Safe • Anonymous • Supportive'}
           </Text>
         </View>
-        <View style={styles.headerRight} />
+        <View style={styles.headerRight}>
+          {isQuickVentMode && quickVentTimer > 0 && (
+            <View style={[styles.timerContainer, { backgroundColor: currentTheme.accent + '20' }]}>
+              <Clock size={12} color={currentTheme.accent} />
+              <Text style={[styles.timerText, { color: currentTheme.accent }]}>
+                {formatTimer(quickVentTimer)}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Emotion selector first - more intuitive flow */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>How are you feeling?</Text>
-          <View style={styles.emotionsGrid}>
-            {emotions.map((emotion) => {
-              const isSelected = selectedEmotion === emotion;
-              const theme = emotionTheme[emotion];
-              
-              return (
-                <TouchableOpacity
-                  key={emotion}
-                  style={[
-                    styles.emotionChip,
-                    {
-                      backgroundColor: isSelected ? theme.bg : 'transparent',
-                      borderColor: isSelected ? theme.accent : colors.border,
-                    }
-                  ]}
-                  onPress={() => setSelectedEmotion(emotion)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.emotionLabel,
-                    {
-                      color: isSelected ? theme.accent : colors.text + '70',
-                    }
-                  ]}>
-                    {theme.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+        {/* ✅ NEW: Location info banner */}
+        {userLocation && !isQuickVentMode && (
+          <View style={[styles.locationBanner, { backgroundColor: currentTheme.bg, borderColor: currentTheme.border }]}>
+            <View style={styles.locationContent}>
+              <MapPin size={16} color={currentTheme.accent} />
+              <Text style={[styles.locationText, { color: colors.text + '70' }]}>
+                Sharing from {userLocation}
+              </Text>
+            </View>
+            <Text style={[styles.locationSubtext, { color: colors.text + '50' }]}>
+              Your post will be visible to people in your area and beyond
+            </Text>
           </View>
-        </View>
+        )}
+
+        {/* Quick Vent Mode Banner */}
+        {isQuickVentMode && (
+          <View style={[styles.quickVentBanner, { backgroundColor: currentTheme.bg, borderColor: currentTheme.border }]}>
+            <Text style={[styles.quickVentTitle, { color: currentTheme.accent }]}>
+              ⚡ Quick Vent Mode
+            </Text>
+            <Text style={[styles.quickVentDesc, { color: colors.text + '70' }]}>
+              {quickVentTimer > 0 
+                ? `Write whatever's on your mind. ${formatTimer(quickVentTimer)} left to share quickly!`
+                : 'Take your time now. You can still share when ready.'
+              }
+            </Text>
+            <TouchableOpacity 
+              onPress={() => setIsQuickVentMode(false)}
+              style={styles.exitQuickVent}
+            >
+              <Text style={[styles.exitQuickVentText, { color: colors.text + '60' }]}>
+                Exit quick mode
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Emotion selector - hide in quick vent mode initially */}
+        {!isQuickVentMode && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>What's your vibe?</Text>
+            <View style={styles.emotionsGrid}>
+              {emotions.map((emotion) => {
+                const isSelected = selectedEmotion === emotion;
+                const theme = emotionTheme[emotion];
+                
+                return (
+                  <TouchableOpacity
+                    key={emotion}
+                    style={[
+                      styles.emotionChip,
+                      {
+                        backgroundColor: isSelected ? theme.bg : 'transparent',
+                        borderColor: isSelected ? theme.accent : colors.border,
+                      }
+                    ]}
+                    onPress={() => setSelectedEmotion(emotion)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.emotionEmoji}>{theme.emoji}</Text>
+                    <Text style={[
+                      styles.emotionLabel,
+                      {
+                        color: isSelected ? theme.accent : colors.text + '70',
+                      }
+                    ]}>
+                      {theme.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* Dynamic text input with emotion-based styling */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Share your thoughts</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            {isQuickVentMode ? 'What\'s on your mind?' : 'Share your thoughts'}
+          </Text>
           <View style={[
             styles.inputContainer, 
             { 
@@ -189,20 +361,27 @@ export default function ShareScreen() {
             }
           ]}>
             <TextInput
-              style={[styles.textInput, { color: colors.text }]}
-              placeholder={emotionPrompts[selectedEmotion]}
+              style={[
+                styles.textInput, 
+                { 
+                  color: colors.text,
+                  minHeight: isQuickVentMode ? 80 : 120 
+                }
+              ]}
+              placeholder={getPlaceholder()}
               placeholderTextColor={colors.text + '40'}
               multiline
               value={text}
               onChangeText={setText}
               maxLength={MAX_CHARS}
               textAlignVertical="top"
+              autoFocus={isQuickVentMode}
             />
             <View style={styles.inputFooter}>
               <View style={styles.inputMeta}>
-                <View style={[styles.emotionIndicator, { backgroundColor: currentTheme.accent }]} />
+                <Text style={styles.emotionEmoji}>{currentTheme.emoji}</Text>
                 <Text style={[styles.emotionText, { color: currentTheme.accent }]}>
-                  {currentTheme.label} moment
+                  {currentTheme.label} {isQuickVentMode ? 'vent' : 'moment'}
                 </Text>
               </View>
               <Text style={[styles.charCount, { color: colors.text + '50' }]}>
@@ -212,7 +391,7 @@ export default function ShareScreen() {
           </View>
         </View>
 
-        {/* Refined chat toggle */}
+        {/* Chat toggle - simplified in quick vent mode */}
         <View style={styles.section}>
           <TouchableOpacity
             style={[
@@ -240,10 +419,13 @@ export default function ShareScreen() {
                   styles.chatToggleTitle, 
                   { color: openForChat ? currentTheme.accent : colors.text }
                 ]}>
-                  Allow supportive messages
+                  {isQuickVentMode ? 'Allow messages' : 'Allow supportive messages'}
                 </Text>
                 <Text style={[styles.chatToggleSubtitle, { color: colors.text + '50' }]}>
-                  Others can send anonymous encouragement
+                  {isQuickVentMode 
+                    ? 'Others can respond to help' 
+                    : 'Others can send anonymous encouragement'
+                  }
                 </Text>
               </View>
             </View>
@@ -263,17 +445,20 @@ export default function ShareScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Encouragement note */}
+        {/* Encouragement note - different for quick vent */}
         <View style={[styles.encouragementCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.encouragementIcon, { backgroundColor: currentTheme.bg }]}>
             <Heart size={16} color={currentTheme.accent} />
           </View>
           <View style={styles.encouragementContent}>
             <Text style={[styles.encouragementTitle, { color: colors.text }]}>
-              Your feelings matter
+              {isQuickVentMode ? 'You\'re doing great' : 'Your feelings matter'}
             </Text>
             <Text style={[styles.encouragementText, { color: colors.text + '60' }]}>
-              Sharing your emotions helps you process them and connect with others who understand.
+              {isQuickVentMode 
+                ? 'Sometimes we just need to get things out. That\'s perfectly okay.'
+                : 'Sharing your emotions helps you process them and connect with others who understand.'
+              }
             </Text>
           </View>
         </View>
@@ -302,7 +487,12 @@ export default function ShareScreen() {
         >
           <Send size={18} color="white" />
           <Text style={styles.submitButtonText}>
-            {isSubmitting ? 'Sharing safely...' : 'Share anonymously'}
+            {isSubmitting 
+              ? 'Sharing safely...' 
+              : isQuickVentMode 
+                ? 'Share quick vent' 
+                : 'Share anonymously'
+            }
           </Text>
         </TouchableOpacity>
       </View>
@@ -341,12 +531,77 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   headerRight: {
-    width: 40,
+    width: 60,
+    alignItems: 'flex-end',
+  },
+  
+  // Timer
+  timerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  timerText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   
   content: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  
+  // ✅ NEW: Location banner styles
+  locationBanner: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  locationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  locationText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  locationSubtext: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  
+  // Quick Vent Banner
+  quickVentBanner: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  quickVentTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  quickVentDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 8,
+  },
+  exitQuickVent: {
+    alignSelf: 'flex-start',
+  },
+  exitQuickVentText: {
+    fontSize: 11,
+    fontWeight: '500',
+    textDecorationLine: 'underline',
   },
   
   // Sections
@@ -361,19 +616,25 @@ const styles = StyleSheet.create({
     letterSpacing: -0.1,
   },
   
-  // Emotion selection
+  // Emotion selection - Updated layout
   emotionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    justifyContent: 'space-between',
+    gap: 8,
   },
   emotionChip: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 20,
     borderWidth: 1,
-    minWidth: 100,
+    minWidth: '30%',
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  emotionEmoji: {
+    fontSize: 16,
+    marginBottom: 4,
   },
   emotionLabel: {
     fontSize: 13,
@@ -404,11 +665,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  emotionIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   emotionText: {
     fontSize: 12,

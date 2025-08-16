@@ -19,58 +19,60 @@ import { useFocusEffect } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 
+// Updated emotion system
 const emotionColors = {
-  sad: '#6366f1',
-  angry: '#ef4444',
-  anxious: '#f59e0b',
-  guilty: '#8b5cf6',
-  happy: '#10b981',
-  empty: '#06b6d4',
+  chaotic: '#ef4444',
+  overthinking: '#f59e0b',
+  drained: '#6366f1',
+  vibing: '#10b981',
+  frustrated: '#8b5cf6',
+  contemplating: '#6b7280',
+  excited: '#f97316',
+  nostalgic: '#ec4899',
 };
 
 const emotionBackgrounds = {
-  sad: '#f8fafc',
-  angry: '#fef2f2',
-  anxious: '#fffbeb',
-  guilty: '#faf5ff',
-  happy: '#f0fdf4',
-  empty: '#f0f9ff',
-};
-
-const emotionAccents = {
-  sad: '#6366f1',
-  angry: '#ef4444',
-  anxious: '#f59e0b',
-  guilty: '#8b5cf6',
-  happy: '#10b981',
-  empty: '#06b6d4',
+  chaotic: '#fef2f2',
+  overthinking: '#fffbeb',
+  drained: '#f0f4ff',
+  vibing: '#f0fdf4',
+  frustrated: '#faf5ff',
+  contemplating: '#f9fafb',
+  excited: '#fff7ed',
+  nostalgic: '#fdf2f8',
 };
 
 const emotionLabels = {
-  sad: 'Sad',
-  angry: 'Angry',
-  anxious: 'Anxious',
-  guilty: 'Guilty',
-  happy: 'Happy',
-  empty: 'Empty',
+  chaotic: 'Chaotic',
+  overthinking: 'Overthinking',
+  drained: 'Drained',
+  vibing: 'Vibing',
+  frustrated: 'Frustrated',
+  contemplating: 'Contemplating',
+  excited: 'Excited',
+  nostalgic: 'Nostalgic',
 };
 
 const emotionIcons = {
-  sad: '💙',
-  angry: '🔥',
-  anxious: '⚡',
-  guilty: '💜',
-  happy: '✨',
-  empty: '○',
+  chaotic: '🌪️',
+  overthinking: '🧠',
+  drained: '🔋',
+  vibing: '✨',
+  frustrated: '😤',
+  contemplating: '💭',
+  excited: '🚀',
+  nostalgic: '🌅',
 };
 
 const moodDescriptors = {
-  sad: 'moments of reflection',
-  angry: 'intense feelings',
-  anxious: 'restless energy', 
-  guilty: 'heavy thoughts',
-  happy: 'bright moments',
-  empty: 'quiet spaces',
+  chaotic: 'intense energy',
+  overthinking: 'deep thoughts',
+  drained: 'low energy',
+  vibing: 'positive flow',
+  frustrated: 'blocked feelings',
+  contemplating: 'quiet reflection',
+  excited: 'high energy',
+  nostalgic: 'memory lanes',
 };
 
 export default function MoodTrackerScreen() {
@@ -181,11 +183,15 @@ export default function MoodTrackerScreen() {
     if (moodEntries.length === 0) return [];
     
     const flow: { [key in EmotionType]: number } = {
-      'happy': 0, 'sad': 0, 'anxious': 0, 'angry': 0, 'guilty': 0, 'empty': 0
+      'chaotic': 0, 'overthinking': 0, 'drained': 0, 'vibing': 0, 
+      'frustrated': 0, 'contemplating': 0, 'excited': 0, 'nostalgic': 0
     };
     
     moodEntries.forEach(entry => {
-      flow[entry.mood]++;
+      // Handle backwards compatibility for old emotions
+      if (flow[entry.mood] !== undefined) {
+        flow[entry.mood]++;
+      }
     });
     
     return Object.entries(flow)
@@ -238,8 +244,8 @@ export default function MoodTrackerScreen() {
 
         <View style={styles.insightsSection}>
           <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.insightIcon, { backgroundColor: emotionBackgrounds.happy }]}>
-              <Sparkles size={16} color={emotionColors.happy} />
+            <View style={[styles.insightIcon, { backgroundColor: emotionBackgrounds.vibing }]}>
+              <Sparkles size={16} color={emotionColors.vibing} />
             </View>
             <Text style={[styles.insightLabel, { color: colors.text }]}>Journey Stage</Text>
             <Text style={[styles.insightValue, { color: colors.text + '60' }]}>
@@ -248,8 +254,8 @@ export default function MoodTrackerScreen() {
           </View>
           
           <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.insightIcon, { backgroundColor: emotionBackgrounds.happy }]}>
-              <Heart size={16} color={emotionColors.happy} />
+            <View style={[styles.insightIcon, { backgroundColor: emotionBackgrounds.excited }]}>
+              <Heart size={16} color={emotionColors.excited} />
             </View>
             <Text style={[styles.insightLabel, { color: colors.text }]}>Recent Focus</Text>
             <Text style={[styles.insightValue, { color: colors.text + '60' }]}>
@@ -314,7 +320,7 @@ export default function MoodTrackerScreen() {
                     style={[
                       styles.moodDot,
                       {
-                        backgroundColor: day.hasEntries && day.dominantMood 
+                        backgroundColor: day.hasEntries && day.dominantMood && emotionColors[day.dominantMood]
                           ? emotionColors[day.dominantMood] 
                           : colors.border,
                         opacity: day.intensity === 'none' ? 0.2 : 
@@ -350,44 +356,50 @@ export default function MoodTrackerScreen() {
               The feelings you've been exploring
             </Text>
             
-            {moodFlow.slice(0, 6).map((item, index) => (
-              <View key={item.mood} style={styles.flowRow}>
-                <View style={styles.flowLeft}>
-                  <View style={[
-                    styles.flowIconContainer,
-                    { backgroundColor: emotionBackgrounds[item.mood] }
-                  ]}>
-                    <Text style={styles.flowIcon}>{emotionIcons[item.mood]}</Text>
+            {moodFlow.slice(0, 8).map((item, index) => {
+              // Check if emotion exists in our new system
+              const emotionExists = emotionColors[item.mood] && emotionBackgrounds[item.mood];
+              if (!emotionExists) return null;
+
+              return (
+                <View key={item.mood} style={styles.flowRow}>
+                  <View style={styles.flowLeft}>
+                    <View style={[
+                      styles.flowIconContainer,
+                      { backgroundColor: emotionBackgrounds[item.mood] }
+                    ]}>
+                      <Text style={styles.flowIcon}>{emotionIcons[item.mood]}</Text>
+                    </View>
+                    <View style={styles.flowContent}>
+                      <Text style={[styles.flowLabel, { color: colors.text }]}>
+                        {emotionLabels[item.mood]}
+                      </Text>
+                      <Text style={[styles.flowDescription, { color: colors.text + '60' }]}>
+                        {moodDescriptors[item.mood]}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.flowContent}>
-                    <Text style={[styles.flowLabel, { color: colors.text }]}>
-                      {emotionLabels[item.mood]}
-                    </Text>
-                    <Text style={[styles.flowDescription, { color: colors.text + '60' }]}>
-                      {moodDescriptors[item.mood]}
+                  
+                  <View style={styles.flowRight}>
+                    <View style={[styles.presenceIndicator, { backgroundColor: colors.border }]}>
+                      <View
+                        style={[
+                          styles.presenceBar,
+                          {
+                            width: item.presence === 'light' ? '25%' :
+                                   item.presence === 'moderate' ? '60%' : '100%',
+                            backgroundColor: emotionColors[item.mood],
+                          }
+                        ]}
+                      />
+                    </View>
+                    <Text style={[styles.presenceText, { color: emotionColors[item.mood] }]}>
+                      {item.count} times
                     </Text>
                   </View>
                 </View>
-                
-                <View style={styles.flowRight}>
-                  <View style={[styles.presenceIndicator, { backgroundColor: colors.border }]}>
-                    <View
-                      style={[
-                        styles.presenceBar,
-                        {
-                          width: item.presence === 'light' ? '25%' :
-                                 item.presence === 'moderate' ? '60%' : '100%',
-                          backgroundColor: emotionColors[item.mood],
-                        }
-                      ]}
-                    />
-                  </View>
-                  <Text style={[styles.presenceText, { color: emotionColors[item.mood] }]}>
-                    {item.count} times
-                  </Text>
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 
@@ -398,49 +410,55 @@ export default function MoodTrackerScreen() {
               Your latest emotional check-ins
             </Text>
             
-            {moodEntries.slice(0, 5).map((entry, index) => (
-              <View key={entry.id || index} style={[styles.entryRow, { borderBottomColor: colors.border }]}>
-                <View style={styles.entryLeft}>
-                  <View style={[
-                    styles.entryIconContainer,
-                    { backgroundColor: emotionBackgrounds[entry.mood] }
-                  ]}>
-                    <Text style={styles.entryIcon}>{emotionIcons[entry.mood]}</Text>
-                  </View>
-                  <View style={styles.entryContent}>
-                    <Text style={[styles.entryMood, { color: colors.text }]}>
-                      {emotionLabels[entry.mood]} moment
-                    </Text>
-                    <Text style={[styles.entryDate, { color: colors.text + '50' }]}>
-                      {new Date(entry.timestamp).toLocaleDateString('en-US', {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit'
-                      })}
-                    </Text>
-                    {entry.notes && (
-                      <Text style={[styles.entryNotes, { color: colors.text + '70' }]} numberOfLines={2}>
-                        "{entry.notes}"
+            {moodEntries.slice(0, 5).map((entry, index) => {
+              // Handle backwards compatibility - show old emotions with fallback
+              const emotionExists = emotionColors[entry.mood] && emotionBackgrounds[entry.mood];
+              const displayMood = emotionExists ? entry.mood : 'contemplating';
+              
+              return (
+                <View key={entry.id || index} style={[styles.entryRow, { borderBottomColor: colors.border }]}>
+                  <View style={styles.entryLeft}>
+                    <View style={[
+                      styles.entryIconContainer,
+                      { backgroundColor: emotionBackgrounds[displayMood] }
+                    ]}>
+                      <Text style={styles.entryIcon}>{emotionIcons[displayMood]}</Text>
+                    </View>
+                    <View style={styles.entryContent}>
+                      <Text style={[styles.entryMood, { color: colors.text }]}>
+                        {emotionLabels[displayMood]} moment
                       </Text>
-                    )}
+                      <Text style={[styles.entryDate, { color: colors.text + '50' }]}>
+                        {new Date(entry.timestamp).toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit'
+                        })}
+                      </Text>
+                      {entry.notes && (
+                        <Text style={[styles.entryNotes, { color: colors.text + '70' }]} numberOfLines={2}>
+                          "{entry.notes}"
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  
+                  <View style={[
+                    styles.moodBadge,
+                    { backgroundColor: emotionBackgrounds[displayMood] }
+                  ]}>
+                    <Text style={[
+                      styles.moodBadgeText,
+                      { color: emotionColors[displayMood] }
+                    ]}>
+                      {emotionLabels[displayMood]}
+                    </Text>
                   </View>
                 </View>
-                
-                <View style={[
-                  styles.moodBadge,
-                  { backgroundColor: emotionBackgrounds[entry.mood] }
-                ]}>
-                  <Text style={[
-                    styles.moodBadgeText,
-                    { color: emotionColors[entry.mood] }
-                  ]}>
-                    {emotionLabels[entry.mood]}
-                  </Text>
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 

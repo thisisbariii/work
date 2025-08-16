@@ -20,14 +20,24 @@ import { db, auth } from '@/config/firebase';
 import { Post, MoodEntry, Chat, ChatMessage, EmotionType } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureAuthenticated, getCurrentUserId } from '@/utils/anonymousAuth';
+import * as Location from 'expo-location';
 
+const USER_LOCATION_KEY = 'user_location_cache';
 const OFFLINE_POSTS_KEY = 'offline_posts';
 const OFFLINE_MOODS_KEY = 'offline_moods';
 const LIKED_POSTS_KEY = 'liked_posts';
 const getUserPostsKey = (userId: string) => `user_posts_${userId}`;
 const CURRENT_USER_ID_KEY = 'current_user_id_cache';
 
-// Interface for participated chats
+interface UserLocation {
+  city: string;
+  state: string;
+  country: string;
+  latitude?: number;
+  longitude?: number;
+  timestamp: number;
+}
+
 interface ParticipatedChat {
   id: string;
   postId: string;
@@ -39,6 +49,14 @@ interface ParticipatedChat {
   lastMessageTime?: number;
 }
 
+interface LocationFilter {
+  city?: string;
+  state?: string;
+  country?: string;
+  limit: number;
+  excludeIds?: string[];
+}
+
 export class FirebaseService {
   private static async getConsistentUserId(): Promise<string> {
     try {
@@ -46,12 +64,14 @@ export class FirebaseService {
       const currentUserId = await getCurrentUserId();
       
       if (cachedUserId && cachedUserId !== currentUserId) {
-        // Handle user ID change if needed
+        console.log('🔄 User ID changed, clearing caches');
+        await this.clearAllCaches();
       }
       
       await AsyncStorage.setItem(CURRENT_USER_ID_KEY, currentUserId);
       return currentUserId;
     } catch (error) {
+      console.error('❌ Error getting consistent user ID:', error);
       return await getCurrentUserId();
     }
   }
@@ -60,52 +80,286 @@ export class FirebaseService {
     try {
       await ensureAuthenticated();
       const userId = await this.getConsistentUserId();
-      const firebaseUser = auth.currentUser;
+      console.log('🔐 Auth test - User ID:', userId);
       
       const testQuery = query(
         collection(db, 'posts'),
+        where('isDeleted', '==', false),
         limit(1)
       );
       
       const snapshot = await getDocs(testQuery);
+      console.log('🔐 Auth test - Can query posts:', !snapshot.empty);
     } catch (error) {
+      console.error('❌ Auth test failed:', error);
       throw error;
     }
   }
 
-  static async createPost(text: string, emotionTag: EmotionType, openForChat: boolean): Promise<string> {
+  static async requestLocationPermission(): Promise<boolean> {
     try {
-      await ensureAuthenticated();
-      const userId = await this.getConsistentUserId();
-      
-      const post: Omit<Post, 'id'> = {
-        text,
-        emotionTag,
-        timestamp: Date.now(),
-        likes: 0,
-        userId,
-        openForChat,
-        isDeleted: false,
-      };
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      console.log('📍 Location permission status:', status);
+      return status === 'granted';
+    } catch (error) {
+      console.error('❌ Error requesting location permission:', error);
+      return false;
+    }
+  }
 
-      const docRef = await addDoc(collection(db, 'posts'), {
-        ...post,
-        timestamp: Timestamp.fromDate(new Date()),
+  static async getCurrentLocation(): Promise<UserLocation | null> {
+    try {
+      const cachedLocation = await AsyncStorage.getItem(USER_LOCATION_KEY);
+      if (cachedLocation) {
+        const location: UserLocation = JSON.parse(cachedLocation);
+        const isRecent = Date.now() - location.timestamp < 24 * 60 * 60 * 1000;
+        if (isRecent) {
+          console.log('📍 Using cached location:', location.city);
+          return location;
+        }
+      }
+
+      const hasPermission = await this.requestLocationPermission();
+      if (!hasPermission) {
+        console.log('📍 Location permission denied, using fallback');
+        return null;
+      }
+
+      console.log('📍 Getting fresh location...');
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 10000,
       });
 
-      const fullPost: Post = { ...post, id: docRef.id };
-      await this.cachePostLocally(fullPost);
-      await this.cacheUserPost(fullPost, userId);
-      
-      return docRef.id;
+      const { latitude, longitude } = position.coords;
+      const reverseGeocode = await Location.reverseGeocodeAsync({
+        latitude,
+        longitude,
+      });
+
+      if (reverseGeocode && reverseGeocode.length > 0) {
+        const location = reverseGeocode[0];
+        const userLocation: UserLocation = {
+          city: location.city || 'Unknown City',
+          state: location.region || location.subregion || 'Unknown State',
+          country: location.country || 'Unknown Country',
+          latitude,
+          longitude,
+          timestamp: Date.now(),
+        };
+
+        await AsyncStorage.setItem(USER_LOCATION_KEY, JSON.stringify(userLocation));
+        console.log('📍 Fresh location detected:', userLocation);
+        return userLocation;
+      }
+
+      return null;
     } catch (error) {
-      await this.storeOfflinePost(text, emotionTag, openForChat);
-      throw error;
+      console.error('❌ Error getting location:', error);
+      return null;
+    }
+  }
+
+  private static async getPostsByLocation(filter: LocationFilter): Promise<Post[]> {
+    try {
+      let baseQuery = query(
+        collection(db, 'posts'),
+        where('isDeleted', '==', false),
+        orderBy('timestamp', 'desc'),
+        limit(filter.limit)
+      );
+
+      if (filter.city) {
+        baseQuery = query(baseQuery, where('location.city', '==', filter.city));
+      } else if (filter.state) {
+        baseQuery = query(baseQuery, where('location.state', '==', filter.state));
+      } else if (filter.country) {
+        baseQuery = query(baseQuery, where('location.country', '==', filter.country));
+      }
+
+      const snapshot = await getDocs(baseQuery);
+      
+      const posts = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          timestamp: doc.data().timestamp?.toMillis() || Date.now(),
+        } as Post))
+        .filter(post => {
+          return !filter.excludeIds?.includes(post.id);
+        });
+
+      return posts;
+    } catch (error) {
+      console.error(`❌ Error getting posts by location:`, error);
+      return [];
+    }
+  }
+
+  static async getSmartLocationFeed(lastDoc?: any, pageSize: number = 20): Promise<Post[]> {
+    try {
+      console.log('🎯 Getting smart location-based feed...');
+      
+      const userLocation = await this.getCurrentLocation();
+      
+      if (!userLocation) {
+        console.log('📍 No location - using global feed');
+        return await this.getPosts(lastDoc);
+      }
+
+      console.log(`📍 User location: ${userLocation.city}, ${userLocation.state}, ${userLocation.country}`);
+
+      const allPosts: Post[] = [];
+      const postIds = new Set<string>();
+
+      const cityTarget = Math.floor(pageSize * 0.6);
+      console.log(`🏙️ Getting up to ${cityTarget} posts from ${userLocation.city}...`);
+      
+      const cityPosts = await this.getPostsByLocation({
+        city: userLocation.city,
+        limit: cityTarget + 5,
+      });
+
+      cityPosts.slice(0, cityTarget).forEach(post => {
+        if (!postIds.has(post.id)) {
+          const postWithPriority: Post = { ...post, locationPriority: 'city' };
+          allPosts.push(postWithPriority);
+          postIds.add(post.id);
+        }
+      });
+
+      console.log(`✅ Added ${allPosts.length} city posts`);
+
+      const stateTarget = Math.floor(pageSize * 0.25);
+      const stateNeeded = Math.max(0, stateTarget);
+      
+      if (stateNeeded > 0) {
+        console.log(`🏛️ Getting up to ${stateNeeded} posts from ${userLocation.state}...`);
+        
+        const statePosts = await this.getPostsByLocation({
+          state: userLocation.state,
+          limit: stateNeeded + 5,
+          excludeIds: Array.from(postIds),
+        });
+
+        statePosts.slice(0, stateNeeded).forEach(post => {
+          if (!postIds.has(post.id)) {
+            const postWithPriority: Post = { ...post, locationPriority: 'state' };
+            allPosts.push(postWithPriority);
+            postIds.add(post.id);
+          }
+        });
+
+        console.log(`✅ Added ${allPosts.length - cityTarget} state posts`);
+      }
+
+      const countryTarget = Math.floor(pageSize * 0.1);
+      const countryNeeded = Math.max(0, countryTarget);
+      
+      if (countryNeeded > 0 && allPosts.length < pageSize) {
+        console.log(`🌍 Getting up to ${countryNeeded} posts from ${userLocation.country}...`);
+        
+        const countryPosts = await this.getPostsByLocation({
+          country: userLocation.country,
+          limit: countryNeeded + 3,
+          excludeIds: Array.from(postIds),
+        });
+
+        countryPosts.slice(0, countryNeeded).forEach(post => {
+          if (!postIds.has(post.id)) {
+            const postWithPriority: Post = { ...post, locationPriority: 'country' };
+            allPosts.push(postWithPriority);
+            postIds.add(post.id);
+          }
+        });
+
+        console.log(`✅ Added ${allPosts.length - cityTarget - stateNeeded} country posts`);
+      }
+
+      const globalNeeded = pageSize - allPosts.length;
+      
+      if (globalNeeded > 0) {
+        console.log(`🌐 Getting ${globalNeeded} global posts to fill remaining slots...`);
+        
+        const globalPosts = await this.getGlobalPosts(globalNeeded + 5, Array.from(postIds));
+        
+        globalPosts.slice(0, globalNeeded).forEach(post => {
+          if (!postIds.has(post.id)) {
+            const postWithPriority: Post = { ...post, locationPriority: 'global' };
+            allPosts.push(postWithPriority);
+            postIds.add(post.id);
+          }
+        });
+
+        console.log(`✅ Added ${allPosts.length - (pageSize - globalNeeded)} global posts`);
+      }
+
+      allPosts.sort((a, b) => {
+        const priorityOrder: Record<string, number> = { 
+          city: 1, 
+          state: 2, 
+          country: 3, 
+          global: 4 
+        };
+        const aPriority = priorityOrder[a.locationPriority || 'global'];
+        const bPriority = priorityOrder[b.locationPriority || 'global'];
+        
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority;
+        }
+        
+        return b.timestamp - a.timestamp;
+      });
+
+      await this.cachePosts(allPosts);
+
+      console.log(`🎯 Smart feed complete: ${allPosts.length} posts`);
+      console.log(`📊 Breakdown:`, {
+        city: allPosts.filter(p => p.locationPriority === 'city').length,
+        state: allPosts.filter(p => p.locationPriority === 'state').length,
+        country: allPosts.filter(p => p.locationPriority === 'country').length,
+        global: allPosts.filter(p => p.locationPriority === 'global').length,
+      });
+
+      return allPosts;
+
+    } catch (error) {
+      console.error('❌ Error getting smart location feed:', error);
+      console.log('🔄 Falling back to regular posts');
+      return await this.getPosts(lastDoc);
+    }
+  }
+
+  private static async getGlobalPosts(limitCount: number, excludeIds: string[] = []): Promise<Post[]> {
+    try {
+      const globalQuery = query(
+        collection(db, 'posts'),
+        where('isDeleted', '==', false),
+        orderBy('timestamp', 'desc'),
+        limit(limitCount + excludeIds.length)
+      );
+
+      const snapshot = await getDocs(globalQuery);
+      
+      return snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          timestamp: doc.data().timestamp?.toMillis() || Date.now(),
+        } as Post))
+        .filter(post => !excludeIds.includes(post.id))
+        .slice(0, limitCount);
+
+    } catch (error) {
+      console.error('❌ Error getting global posts:', error);
+      return [];
     }
   }
 
   static async getPosts(lastDoc?: any): Promise<Post[]> {
     try {
+      console.log('🔍 Getting regular posts...');
+      
       let q = query(
         collection(db, 'posts'),
         where('isDeleted', '==', false),
@@ -117,17 +371,130 @@ export class FirebaseService {
         q = query(q, where('timestamp', '<', lastDoc));
       }
 
+      console.log('📡 Executing posts query...');
       const snapshot = await getDocs(q);
-      const posts: Post[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toMillis() || Date.now(),
-      } as Post));
+      
+      console.log(`📊 Query returned ${snapshot.docs.length} documents`);
+      
+      const posts: Post[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          timestamp: data.timestamp?.toMillis ? data.timestamp.toMillis() : (data.timestamp || Date.now()),
+        } as Post;
+      });
 
-      await this.cachePosts(posts);
-      return posts;
+      const validPosts = posts.filter(post => !post.isDeleted);
+      console.log(`✅ Returning ${validPosts.length} valid posts`);
+
+      await this.cachePosts(validPosts);
+      return validPosts;
     } catch (error) {
-      return await this.getCachedPosts();
+      console.error('❌ Error getting posts from Firebase:', error);
+      console.log('🔄 Falling back to cached posts');
+      const cachedPosts = await this.getCachedPosts();
+      console.log(`📱 Cached posts count: ${cachedPosts.length}`);
+      return cachedPosts;
+    }
+  }
+
+  static async getPostsWithLocation(lastDoc?: any, forceGlobal: boolean = false): Promise<Post[]> {
+    if (forceGlobal) {
+      return await this.getPosts(lastDoc);
+    }
+    return await this.getSmartLocationFeed(lastDoc);
+  }
+
+  static async debugPostsInDatabase(): Promise<void> {
+    try {
+      console.log('🔍 DEBUG: Checking all posts in database...');
+      
+      const currentUserId = await this.getConsistentUserId();
+      console.log('👤 Current user ID:', currentUserId);
+      
+      const allPostsQuery = query(
+        collection(db, 'posts'),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+      );
+      
+      const snapshot = await getDocs(allPostsQuery);
+      console.log(`📊 Total posts in database: ${snapshot.docs.length}`);
+      
+      snapshot.docs.forEach((doc, index) => {
+        const data = doc.data();
+        console.log(`📄 Post ${index + 1}:`, {
+          id: doc.id,
+          text: data.text?.substring(0, 30) + '...',
+          userId: data.userId,
+          emotionTag: data.emotionTag,
+          isDeleted: data.isDeleted,
+          timestamp: data.timestamp?.toMillis ? data.timestamp.toMillis() : data.timestamp,
+          isCurrentUser: data.userId === currentUserId,
+          location: data.location || 'No location'
+        });
+      });
+      
+      const activePosts = snapshot.docs.filter(doc => !doc.data().isDeleted);
+      const deletedPosts = snapshot.docs.filter(doc => doc.data().isDeleted);
+      const userPosts = snapshot.docs.filter(doc => doc.data().userId === currentUserId);
+      const otherUserPosts = snapshot.docs.filter(doc => doc.data().userId !== currentUserId && !doc.data().isDeleted);
+      
+      console.log('📊 Post statistics:', {
+        total: snapshot.docs.length,
+        active: activePosts.length,
+        deleted: deletedPosts.length,
+        byCurrentUser: userPosts.length,
+        byOtherUsers: otherUserPosts.length
+      });
+      
+    } catch (error) {
+      console.error('❌ Error debugging posts:', error);
+    }
+  }
+
+  static async createPost(text: string, emotionTag: EmotionType, openForChat: boolean): Promise<string> {
+    try {
+      await ensureAuthenticated();
+      const userId = await this.getConsistentUserId();
+      
+      console.log('📝 Creating post:', { text: text.substring(0, 50), emotionTag, userId });
+      
+      const userLocation = await this.getCurrentLocation();
+      
+      const post: Omit<Post, 'id'> = {
+        text,
+        emotionTag,
+        timestamp: Date.now(),
+        likes: 0,
+        userId,
+        openForChat,
+        isDeleted: false,
+        ...(userLocation && { 
+          location: {
+            city: userLocation.city,
+            state: userLocation.state,
+            country: userLocation.country
+          }
+        })
+      };
+
+      const docRef = await addDoc(collection(db, 'posts'), {
+        ...post,
+        timestamp: Timestamp.fromDate(new Date()),
+      });
+
+      const fullPost: Post = { ...post, id: docRef.id };
+      await this.cachePostLocally(fullPost);
+      await this.cacheUserPost(fullPost, userId);
+      
+      console.log(`✅ Post created with ID: ${docRef.id}, location: ${userLocation?.city || 'No location'}`);
+      return docRef.id;
+    } catch (error) {
+      console.error('❌ Error creating post:', error);
+      await this.storeOfflinePost(text, emotionTag, openForChat);
+      throw error;
     }
   }
 
@@ -135,6 +502,8 @@ export class FirebaseService {
     try {
       await ensureAuthenticated();
       const userId = await this.getConsistentUserId();
+      
+      console.log('🗑️ Deleting post:', postId);
       
       const postRef = doc(db, 'posts', postId);
       await updateDoc(postRef, { 
@@ -145,18 +514,14 @@ export class FirebaseService {
 
       await this.removePostFromCache(postId);
       await this.removeUserPostFromCache(postId, userId);
+      
+      console.log('✅ Post deleted successfully');
     } catch (error) {
+      console.error('❌ Error deleting post:', error);
       throw error;
     }
   }
 
-  /**
-   * Delete mood entry associated with a post
-   * Since mood entries don't have a direct postId reference, we match by:
-   * - userId (same user)
-   * - mood matches post's emotionTag
-   * - timestamp is close to post's timestamp (within 5 minutes)
-   */
   static async deleteMoodEntryByPost(
     postId: string, 
     userId: string, 
@@ -168,15 +533,12 @@ export class FirebaseService {
       
       console.log('🗑️ Deleting mood entry for post:', { postId, userId, emotionTag, postTimestamp });
       
-      // Define a time window (5 minutes before and after the post)
-      const timeWindow = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const timeWindow = 5 * 60 * 1000;
       const startTime = postTimestamp - timeWindow;
       const endTime = postTimestamp + timeWindow;
       
-      // Query for mood entries that match the criteria
       const moodEntriesRef = collection(db, 'moodEntries');
       
-      // First, get all mood entries for this user with matching emotion
       const userMoodQuery = query(
         moodEntriesRef,
         where('userId', '==', userId),
@@ -191,12 +553,9 @@ export class FirebaseService {
         return;
       }
       
-      // Filter by timestamp on the client side to find entries within the time window
       const matchingEntries = querySnapshot.docs.filter(doc => {
         const moodData = doc.data();
         const moodTimestamp = moodData.timestamp?.toMillis() || moodData.timestamp;
-        
-        // Check if the mood entry timestamp is within our time window
         return moodTimestamp >= startTime && moodTimestamp <= endTime;
       });
       
@@ -205,7 +564,6 @@ export class FirebaseService {
         return;
       }
       
-      // Delete all matching mood entries (there should typically be just one)
       console.log(`🗑️ Found ${matchingEntries.length} matching mood entries to delete`);
       
       const deletePromises = matchingEntries.map(async (doc) => {
@@ -220,15 +578,14 @@ export class FirebaseService {
       });
       
       await Promise.all(deletePromises);
-      
-      // Also remove from local cache
       await this.removeMoodFromCache(matchingEntries.map(doc => doc.id));
       
       console.log('✅ Successfully deleted mood entries associated with post');
       
     } catch (error) {
       console.error('❌ Error deleting mood entry by post:', error);
-throw new Error(`Failed to delete associated mood entry: ${(error as Error).message || 'Unknown error'}`);    }
+      throw new Error(`Failed to delete associated mood entry: ${(error as Error).message || 'Unknown error'}`);
+    }
   }
 
   static async getUserPosts(): Promise<Post[]> {
@@ -576,7 +933,6 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       
       let totalUnread = 0;
       
-      // 1. Get unread messages from posts user owns
       const userPostsQuery = query(
         collection(db, 'posts'),
         where('userId', '==', userId)
@@ -592,7 +948,6 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
         totalUnread += unreadCount;
       }
       
-      // 2. Get unread messages from chats user participated in
       const participatedChats = await this.getUserParticipatedChats();
       const participatedUnread = participatedChats.reduce((sum, chat) => sum + chat.unreadCount, 0);
       totalUnread += participatedUnread;
@@ -622,19 +977,14 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const postsSnapshot = await getDocs(allPostsQuery);
       const participatedChats: ParticipatedChat[] = [];
       
-      // Process each post
       for (const postDoc of postsSnapshot.docs) {
         const postData = postDoc.data();
         const postId = postDoc.id;
         
-        // Skip deleted posts
         if (postData.isDeleted) continue;
-        
-        // Skip posts owned by current user
         if (postData.userId === userId) continue;
         
         try {
-          // Check for chats where user participated
           const chatsQuery = query(
             collection(db, 'posts', postId, 'chats'),
             where('participants', 'array-contains', userId)
@@ -645,7 +995,6 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
           for (const chatDoc of chatsSnapshot.docs) {
             const chatId = chatDoc.id;
             
-            // Get unread count
             const unreadQuery = query(
               collection(db, 'posts', postId, 'chats', chatId, 'messages'),
               where('toUserId', '==', userId),
@@ -655,7 +1004,6 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
             const unreadSnapshot = await getDocs(unreadQuery);
             const unreadCount = unreadSnapshot.docs.length;
             
-            // Get last message
             let lastMessage = '';
             let lastMessageTime = 0;
             
@@ -681,7 +1029,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
               postId: postId,
               postText: postData.text || '',
               postOwnerId: postData.userId || '',
-              emotionTag: (postData.emotionTag as EmotionType) || 'happy',
+              emotionTag: (postData.emotionTag as EmotionType) || 'vibing',
               unreadCount: unreadCount,
               lastMessage: lastMessage,
               lastMessageTime: lastMessageTime
@@ -689,11 +1037,10 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
           }
         } catch (chatError) {
           console.error(`❌ Error loading chats for post ${postId}:`, chatError);
-          // Continue to next post
+          continue;
         }
       }
       
-      // Sort by most recent activity
       participatedChats.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
       
       console.log('✅ Participated chats loaded:', participatedChats.length);
@@ -830,7 +1177,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
             await this.addMoodEntry(item.data.mood, item.data.intensity, item.data.notes);
           }
         } catch (error) {
-          // Continue with other items
+          continue;
         }
       }
       
@@ -842,41 +1189,64 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
 
   static async debugCacheState(): Promise<void> {
     try {
+      console.log('🔍 DEBUG: Cache state analysis...');
+      
       const userId = await this.getConsistentUserId();
       const cachedUserId = await AsyncStorage.getItem(CURRENT_USER_ID_KEY);
       
+      console.log('👤 Current user ID:', userId);
+      console.log('💾 Cached user ID:', cachedUserId);
+      console.log('🔄 IDs match:', userId === cachedUserId);
+      
       const userPostsKey = getUserPostsKey(userId);
       
+      // Check user-specific posts cache
       const userPostsCache = await AsyncStorage.getItem(userPostsKey);
+      const userPostsCount = userPostsCache ? JSON.parse(userPostsCache).length : 0;
+      console.log(`📝 User posts cache (${userPostsKey}):`, userPostsCount, 'posts');
+      
+      // Check general posts cache
       const generalPostsCache = await AsyncStorage.getItem(OFFLINE_POSTS_KEY);
+      const generalPostsCount = generalPostsCache ? JSON.parse(generalPostsCache).length : 0;
+      console.log('📋 General posts cache:', generalPostsCount, 'posts');
       
       if (generalPostsCache) {
         const allPosts = JSON.parse(generalPostsCache);
         const userPostsInGeneral = allPosts.filter((p: Post) => p.userId === userId);
+        console.log('👤 User posts in general cache:', userPostsInGeneral.length);
       }
-    } catch (error) {
-      // Silent fail
-    }
-  }
-
-  static async clearAllCaches(): Promise<void> {
-    try {
-      const userId = await this.getConsistentUserId();
-      const userPostsKey = getUserPostsKey(userId);
       
-      await AsyncStorage.multiRemove([
-        OFFLINE_POSTS_KEY,
-        OFFLINE_MOODS_KEY,
-        LIKED_POSTS_KEY,
-        userPostsKey,
-        CURRENT_USER_ID_KEY
-      ]);
+      // Check other caches
+      const moodsCache = await AsyncStorage.getItem(OFFLINE_MOODS_KEY);
+      const moodsCount = moodsCache ? JSON.parse(moodsCache).length : 0;
+      console.log('😊 Moods cache:', moodsCount, 'entries');
+      
+      const likedPostsCache = await AsyncStorage.getItem(LIKED_POSTS_KEY);
+      const likedPostsCount = likedPostsCache ? JSON.parse(likedPostsCache).length : 0;
+      console.log('❤️ Liked posts cache:', likedPostsCount, 'posts');
+      
+      const locationCache = await AsyncStorage.getItem(USER_LOCATION_KEY);
+      if (locationCache) {
+        const location = JSON.parse(locationCache);
+        console.log('📍 Location cache:', `${location.city}, ${location.state}`);
+        console.log('📍 Location age:', Math.round((Date.now() - location.timestamp) / 1000 / 60), 'minutes');
+      } else {
+        console.log('📍 No location cache');
+      }
+      
+      // Check offline queue
+      const offlineQueue = await AsyncStorage.getItem('offline_queue');
+      const queueCount = offlineQueue ? JSON.parse(offlineQueue).length : 0;
+      console.log('📤 Offline queue:', queueCount, 'items');
+      
+      console.log('✅ Cache state analysis complete');
+      
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error debugging cache state:', error);
     }
   }
 
-  // Private cache methods
+  // Cache management methods
   private static async cachePostLocally(post: Post): Promise<void> {
     try {
       const cachedPosts = await this.getCachedPosts();
@@ -890,7 +1260,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       
       await AsyncStorage.setItem(OFFLINE_POSTS_KEY, JSON.stringify(cachedPosts.slice(0, 50)));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching post locally:', error);
     }
   }
 
@@ -911,7 +1281,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       
       await AsyncStorage.setItem(userPostsKey, JSON.stringify(cachedUserPosts));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching user post:', error);
     }
   }
 
@@ -920,7 +1290,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const userPostsKey = getUserPostsKey(userId);
       await AsyncStorage.setItem(userPostsKey, JSON.stringify(posts));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching user posts:', error);
     }
   }
 
@@ -928,7 +1298,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
     try {
       await AsyncStorage.setItem(OFFLINE_POSTS_KEY, JSON.stringify(posts));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching posts:', error);
     }
   }
 
@@ -937,6 +1307,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const cached = await AsyncStorage.getItem(OFFLINE_POSTS_KEY);
       return cached ? JSON.parse(cached) : [];
     } catch (error) {
+      console.error('❌ Error getting cached posts:', error);
       return [];
     }
   }
@@ -961,6 +1332,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       
       return filteredPosts;
     } catch (error) {
+      console.error('❌ Error getting cached user posts:', error);
       return [];
     }
   }
@@ -971,7 +1343,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const updatedPosts = cachedPosts.filter(post => post.id !== postId);
       await AsyncStorage.setItem(OFFLINE_POSTS_KEY, JSON.stringify(updatedPosts));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error removing post from cache:', error);
     }
   }
 
@@ -983,7 +1355,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const updatedUserPosts = cachedUserPosts.filter(post => post.id !== postId);
       await AsyncStorage.setItem(userPostsKey, JSON.stringify(updatedUserPosts));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error removing user post from cache:', error);
     }
   }
 
@@ -1000,7 +1372,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       
       await AsyncStorage.setItem(OFFLINE_MOODS_KEY, JSON.stringify(cachedMoods.slice(0, 100)));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching mood locally:', error);
     }
   }
 
@@ -1008,7 +1380,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
     try {
       await AsyncStorage.setItem(OFFLINE_MOODS_KEY, JSON.stringify(moods));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching moods:', error);
     }
   }
 
@@ -1017,13 +1389,11 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const cached = await AsyncStorage.getItem(OFFLINE_MOODS_KEY);
       return cached ? JSON.parse(cached) : [];
     } catch (error) {
+      console.error('❌ Error getting cached moods:', error);
       return [];
     }
   }
 
-  /**
-   * Remove mood entries from local cache
-   */
   private static async removeMoodFromCache(moodEntryIds: string[]): Promise<void> {
     try {
       const cachedMoods = await this.getCachedMoods();
@@ -1033,7 +1403,6 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       console.log('🗑️ Removed mood entries from cache:', moodEntryIds);
     } catch (error) {
       console.error('❌ Error removing mood from cache:', error);
-      // Silent fail - cache removal is not critical
     }
   }
 
@@ -1042,6 +1411,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const cached = await AsyncStorage.getItem(LIKED_POSTS_KEY);
       return cached ? JSON.parse(cached) : [];
     } catch (error) {
+      console.error('❌ Error getting liked posts:', error);
       return [];
     }
   }
@@ -1054,7 +1424,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
         await AsyncStorage.setItem(LIKED_POSTS_KEY, JSON.stringify(likedPosts));
       }
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error caching like:', error);
     }
   }
 
@@ -1064,7 +1434,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       const updatedLikes = likedPosts.filter(id => id !== postId);
       await AsyncStorage.setItem(LIKED_POSTS_KEY, JSON.stringify(updatedLikes));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error removing like from cache:', error);
     }
   }
 
@@ -1079,7 +1449,7 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       });
       await AsyncStorage.setItem('offline_queue', JSON.stringify(queue));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error storing offline post:', error);
     }
   }
 
@@ -1094,7 +1464,28 @@ throw new Error(`Failed to delete associated mood entry: ${(error as Error).mess
       });
       await AsyncStorage.setItem('offline_queue', JSON.stringify(queue));
     } catch (error) {
-      // Silent fail
+      console.error('❌ Error storing offline mood:', error);
     }
   }
+
+  static async clearAllCaches(): Promise<void> {
+    try {
+      const userId = await this.getConsistentUserId();
+      const userPostsKey = getUserPostsKey(userId);
+      
+      await AsyncStorage.multiRemove([
+        OFFLINE_POSTS_KEY,
+        OFFLINE_MOODS_KEY,
+        LIKED_POSTS_KEY,
+        userPostsKey,
+        CURRENT_USER_ID_KEY,
+        USER_LOCATION_KEY
+      ]);
+      
+      console.log('✅ All caches cleared');
+    } catch (error) {
+      console.error('❌ Error clearing caches:', error);
+    }
+  }
+  
 }

@@ -19,33 +19,40 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getCurrentUserId } from '@/utils/anonymousAuth';
 import { router } from 'expo-router';
 
-// Refined minimal emotion colors
+// Updated emotion colors for new tags
 const emotionColors = {
-  sad: '#f8fafc',
-  angry: '#fef2f2',
-  anxious: '#fffbeb',
-  guilty: '#faf5ff',
-  happy: '#f0fdf4',
-  empty: '#f0f9ff',
+  chaotic: '#fef2f2',
+  overthinking: '#f0f9ff',
+  drained: '#fafafa',
+  vibing: '#f0fdf4',
+  frustrated: '#fff7ed',
+  contemplating: '#faf5ff',
+  excited: '#fff0f2',
+  nostalgic: '#fffbeb',
 };
 
-// Clean accent colors
+// Updated accent colors for new tags
 const emotionAccents = {
-  sad: '#6366f1',
-  angry: '#ef4444',
-  anxious: '#f59e0b',
-  guilty: '#8b5cf6',
-  happy: '#10b981',
-  empty: '#06b6d4',
+  chaotic: '#ef4444',
+  overthinking: '#06b6d4',
+  drained: '#6b7280',
+  vibing: '#10b981',
+  frustrated: '#f59e0b',
+  contemplating: '#8b5cf6',
+  excited: '#ec4899',
+  nostalgic: '#eab308',
 };
 
+// Updated emotion labels for new tags
 const emotionLabels = {
-  sad: 'Sad',
-  angry: 'Angry',
-  anxious: 'Anxious',
-  guilty: 'Guilty',
-  happy: 'Happy',
-  empty: 'Empty',
+  chaotic: 'Chaotic',
+  overthinking: 'Overthinking',
+  drained: 'Drained',
+  vibing: 'Vibing',
+  frustrated: 'Frustrated',
+  contemplating: 'Contemplating',
+  excited: 'Excited',
+  nostalgic: 'Nostalgic',
 };
 
 interface PostWithUnreadCount extends Post {
@@ -323,7 +330,7 @@ export default function HistoryScreen() {
     ? participatedChats.filter(chat => chat.emotionTag === filter)
     : participatedChats;
 
-  const emotions: EmotionType[] = ['sad', 'angry', 'anxious', 'guilty', 'happy', 'empty'];
+  const emotions: EmotionType[] = ['chaotic', 'overthinking', 'drained', 'vibing', 'frustrated', 'contemplating', 'excited', 'nostalgic'];
 
   const getStreak = () => {
     if (userPosts.length === 0) return 0;
@@ -351,6 +358,8 @@ export default function HistoryScreen() {
 
   const renderPost = ({ item }: { item: PostWithUnreadCount }) => {
     const isDeleting = deletingPosts.has(item.id);
+    const emotionColor = emotionAccents[item.emotionTag] || colors.text;
+    const emotionLabel = emotionLabels[item.emotionTag] || item.emotionTag;
     
     return (
       <View style={[
@@ -363,9 +372,9 @@ export default function HistoryScreen() {
       ]}>
         <View style={styles.postHeader}>
           <View style={styles.postMeta}>
-            <View style={[styles.emotionDot, { backgroundColor: emotionAccents[item.emotionTag] }]} />
-            <Text style={[styles.emotionLabel, { color: emotionAccents[item.emotionTag] }]}>
-              {emotionLabels[item.emotionTag]}
+            <View style={[styles.emotionDot, { backgroundColor: emotionColor }]} />
+            <Text style={[styles.emotionLabel, { color: emotionColor }]}>
+              {emotionLabel}
             </Text>
             <Text style={[styles.dateText, { color: colors.text + '40' }]}>
               {new Date(item.timestamp).toLocaleDateString('en', { 
@@ -453,53 +462,58 @@ export default function HistoryScreen() {
   };
 
   // Render participated chat item
-  const renderParticipatedChat = ({ item }: { item: ParticipatedChat }) => (
-    <TouchableOpacity
-      style={[
-        styles.chatCard, 
-        { 
-          backgroundColor: colors.card, 
-          borderColor: item.unreadCount > 0 ? emotionAccents[item.emotionTag] : colors.border 
-        }
-      ]}
-      onPress={() => handleParticipatedChatPress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.chatHeader}>
-        <View style={styles.chatMeta}>
-          <View style={[styles.emotionDot, { backgroundColor: emotionAccents[item.emotionTag] }]} />
-          <Text style={[styles.emotionLabel, { color: emotionAccents[item.emotionTag] }]}>
-            {emotionLabels[item.emotionTag]}
-          </Text>
-          {item.unreadCount > 0 && (
-            <View style={[styles.unreadIndicator, { backgroundColor: emotionAccents[item.emotionTag] }]}>
-              <Text style={styles.unreadIndicatorText}>{item.unreadCount}</Text>
-            </View>
-          )}
+  const renderParticipatedChat = ({ item }: { item: ParticipatedChat }) => {
+    const emotionColor = emotionAccents[item.emotionTag] || colors.text;
+    const emotionLabel = emotionLabels[item.emotionTag] || item.emotionTag;
+    
+    return (
+      <TouchableOpacity
+        style={[
+          styles.chatCard, 
+          { 
+            backgroundColor: colors.card, 
+            borderColor: item.unreadCount > 0 ? emotionColor : colors.border 
+          }
+        ]}
+        onPress={() => handleParticipatedChatPress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.chatHeader}>
+          <View style={styles.chatMeta}>
+            <View style={[styles.emotionDot, { backgroundColor: emotionColor }]} />
+            <Text style={[styles.emotionLabel, { color: emotionColor }]}>
+              {emotionLabel}
+            </Text>
+            {item.unreadCount > 0 && (
+              <View style={[styles.unreadIndicator, { backgroundColor: emotionColor }]}>
+                <Text style={styles.unreadIndicatorText}>{item.unreadCount}</Text>
+              </View>
+            )}
+          </View>
+          <ArrowRight size={14} color={colors.text + '40'} />
         </View>
-        <ArrowRight size={14} color={colors.text + '40'} />
-      </View>
 
-      <Text style={[styles.chatPostText, { color: colors.text }]} numberOfLines={2}>
-        {item.postText}
-      </Text>
-
-      {item.lastMessage && (
-        <View style={styles.lastMessageContainer}>
-          <Reply size={12} color={colors.text + '50'} />
-          <Text style={[styles.lastMessage, { color: colors.text + '60' }]} numberOfLines={1}>
-            {item.lastMessage}
-          </Text>
-        </View>
-      )}
-
-      {item.lastMessageTime && (
-        <Text style={[styles.chatTime, { color: colors.text + '40' }]}>
-          {formatRelativeTime(item.lastMessageTime)}
+        <Text style={[styles.chatPostText, { color: colors.text }]} numberOfLines={2}>
+          {item.postText}
         </Text>
-      )}
-    </TouchableOpacity>
-  );
+
+        {item.lastMessage && (
+          <View style={styles.lastMessageContainer}>
+            <Reply size={12} color={colors.text + '50'} />
+            <Text style={[styles.lastMessage, { color: colors.text + '60' }]} numberOfLines={1}>
+              {item.lastMessage}
+            </Text>
+          </View>
+        )}
+
+        {item.lastMessageTime && (
+          <Text style={[styles.chatTime, { color: colors.text + '40' }]}>
+            {formatRelativeTime(item.lastMessageTime)}
+          </Text>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   // Format relative time
   const formatRelativeTime = (timestamp: number): string => {
@@ -535,8 +549,8 @@ export default function HistoryScreen() {
 
       <View style={styles.statsSection}>
         <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[styles.statIconContainer, { backgroundColor: emotionColors.happy }]}>
-            <Sparkles size={14} color={emotionAccents.happy} />
+          <View style={[styles.statIconContainer, { backgroundColor: emotionColors.vibing }]}>
+            <Sparkles size={14} color={emotionAccents.vibing} />
           </View>
           <Text style={[styles.statNumber, { color: colors.text }]}>{userPosts.length}</Text>
           <Text style={[styles.statLabel, { color: colors.text + '50' }]}>Posts</Text>
@@ -553,8 +567,8 @@ export default function HistoryScreen() {
         </View>
 
         <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[styles.statIconContainer, { backgroundColor: emotionColors.happy }]}>
-            <TrendingUp size={14} color={emotionAccents.happy} />
+          <View style={[styles.statIconContainer, { backgroundColor: emotionColors.excited }]}>
+            <TrendingUp size={14} color={emotionAccents.excited} />
           </View>
           <Text style={[styles.statNumber, { color: colors.text }]}>{getStreak()}</Text>
           <Text style={[styles.statLabel, { color: colors.text + '50' }]}>Day Streak</Text>
@@ -603,7 +617,11 @@ export default function HistoryScreen() {
       {/* Show filters only for posts */}
       {showingTab === 'posts' && (
         <View style={styles.filtersSection}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filtersScrollContent}
+          >
             <View style={styles.filtersRow}>
               <TouchableOpacity
                 style={[
@@ -628,25 +646,33 @@ export default function HistoryScreen() {
                 const count = userPosts.filter(post => post.emotionTag === emotion).length;
                 if (count === 0) return null;
                 
+                const emotionColor = emotionAccents[emotion] || colors.text;
+                const emotionLabel = emotionLabels[emotion] || emotion;
+                
                 return (
                   <TouchableOpacity
                     key={emotion}
                     style={[
                       styles.filterPill,
                       {
-                        backgroundColor: filter === emotion ? emotionAccents[emotion] : 'transparent',
-                        borderColor: filter === emotion ? emotionAccents[emotion] : colors.border,
+                        backgroundColor: filter === emotion ? emotionColor : 'transparent',
+                        borderColor: filter === emotion ? emotionColor : colors.border,
                       }
                     ]}
                     onPress={() => setFilter(emotion)}
                     activeOpacity={0.7}
                   >
-                    <Text style={[
-                      styles.filterText,
-                      { color: filter === emotion ? 'white' : colors.text + '70' }
-                    ]}>
-                      {emotionLabels[emotion]} ({count})
-                    </Text>
+                    <View style={styles.filterPillContent}>
+                      {filter !== emotion && (
+                        <View style={[styles.filterEmotionDot, { backgroundColor: emotionColor }]} />
+                      )}
+                      <Text style={[
+                        styles.filterText,
+                        { color: filter === emotion ? 'white' : colors.text + '70' }
+                      ]}>
+                        {emotionLabel} ({count})
+                      </Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -866,10 +892,12 @@ const styles = StyleSheet.create({
   filtersSection: {
     marginBottom: 8,
   },
+  filtersScrollContent: {
+    paddingRight: 20,
+  },
   filtersRow: {
     flexDirection: 'row',
     gap: 8,
-    paddingRight: 20,
   },
   filterPill: {
     paddingHorizontal: 16,
@@ -877,6 +905,18 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     alignItems: 'center',
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  filterPillContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  filterEmotionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   filterText: {
     fontSize: 12,

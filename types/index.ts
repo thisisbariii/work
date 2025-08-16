@@ -1,4 +1,9 @@
-// Update your types/index.ts file with these changes:
+
+
+
+
+
+// First, update your types/index.ts file:
 
 export interface ChatMessage {
   id: string;
@@ -6,7 +11,7 @@ export interface ChatMessage {
   toUserId: string;
   text: string;
   timestamp: number;
-  isRead?: boolean; // NEW: Added for message notifications
+  isRead?: boolean;
 }
 
 export interface Post {
@@ -18,6 +23,14 @@ export interface Post {
   userId: string;
   openForChat: boolean;
   isDeleted?: boolean;
+  location?: {
+    city: string;
+    state: string;
+    country: string;
+  };
+  isLocal?: boolean;
+  // ✅ ADD THIS LINE TO FIX THE TYPESCRIPT ERRORS
+  locationPriority?: 'city' | 'state' | 'country' | 'global';
 }
 
 export interface MoodEntry {
@@ -38,32 +51,4 @@ export interface Chat {
   postId: string;
 }
 
-export type EmotionType = 'sad' | 'angry' | 'anxious' | 'guilty' | 'happy' | 'empty';
-
-export interface ThemeContextType {
-  isDark: boolean;
-  toggleTheme: () => void;
-  colors: {
-    background: string;
-    text: string;
-    card: string;
-    primary: string;
-    secondary: string;
-    accent: string;
-    border: string;
-  };
-}
-
-export interface GameCategory {
-  id: string;
-  title: string;
-  description: string;
-  games: Game[];
-}
-
-export interface Game {
-  id: string;
-  title: string;
-  description: string;
-  type: 'breathing' | 'meditation' | 'mindfulness' | 'anxiety';
-}
+export type EmotionType = 'chaotic' | 'overthinking' | 'drained' | 'vibing' | 'frustrated' | 'contemplating' | 'excited' | 'nostalgic';

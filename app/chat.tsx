@@ -15,9 +15,10 @@ import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { FirebaseService } from '@/services/firebaseService';
+import { ChatModerationService } from '@/services/chatModerationService'; // ✅ NEW IMPORT
 import { getCurrentUserId } from '@/utils/anonymousAuth';
 import { ChatMessage } from '@/types';
-import { ArrowLeft, Send, Clock, MessageCircle } from 'lucide-react-native';
+import { ArrowLeft, Send, Clock, MessageCircle, AlertTriangle, Heart } from 'lucide-react-native';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -42,6 +43,11 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  
+  // ✅ NEW: Moderation states
+  const [showModerationWarning, setShowModerationWarning] = useState(false);
+  const [moderationMessage, setModerationMessage] = useState('');
+  const [lastModerationTime, setLastModerationTime] = useState(0);
   
   const flatListRef = useRef<FlatList>(null);
   const messageListenerRef = useRef<(() => void) | null>(null);
@@ -118,6 +124,16 @@ export default function ChatScreen() {
       }
     };
   }, [chatId, postId]);
+
+  // ✅ NEW: Hide moderation warning after 5 seconds
+  useEffect(() => {
+    if (showModerationWarning) {
+      const timer = setTimeout(() => {
+        setShowModerationWarning(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [showModerationWarning]);
 
   const initializeChat = async () => {
     try {
@@ -233,12 +249,36 @@ export default function ChatScreen() {
     }
   };
 
+  // ✅ UPDATED: Add message moderation before sending
   const sendMessage = async () => {
     if (!inputText.trim() || !chatId || !postId || !currentUserId || !receiverId) {
       return;
     }
 
     const messageText = inputText.trim();
+    
+    // ✅ NEW: Check message for inappropriate content
+    const moderationResult = ChatModerationService.moderateMessage(messageText);
+    
+    if (moderationResult.isBlocked) {
+      // Show warning and don't send message
+      setModerationMessage(moderationResult.warningMessage || 'Please keep messages respectful and supportive.');
+      setShowModerationWarning(true);
+      setLastModerationTime(Date.now());
+      
+      // Log the attempt
+      await ChatModerationService.logInappropriateMessage(
+        currentUserId, 
+        chatId, 
+        messageText, 
+        moderationResult.flaggedWords
+      );
+      
+      // Don't clear input immediately - let user see what they wrote
+      return;
+    }
+    
+    // Clear input and proceed with sending
     setInputText('');
 
     const message: ChatMessage = {
@@ -258,6 +298,21 @@ export default function ChatScreen() {
     }
   };
 
+  // ✅ NEW: Show positive suggestions when inappropriate message is attempted
+  const showPositiveSuggestions = () => {
+    const suggestions = ChatModerationService.getPositiveAlternatives();
+    const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
+    
+    Alert.alert(
+      'Let\'s keep it supportive 💙',
+      `Instead, you could try saying something like:\n\n"${randomSuggestion}"`,
+      [
+        { text: 'Use This', onPress: () => setInputText(randomSuggestion) },
+        { text: 'I\'ll Rephrase', style: 'cancel' }
+      ]
+    );
+  };
+
   const formatTimeRemaining = (ms: number): string => {
     const hours = Math.floor(ms / (1000 * 60 * 60));
     const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
@@ -269,6 +324,7 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isCurrentUser = item.fromUserId === currentUserId;
+    const isSupportive = ChatModerationService.isSupportiveMessage(item.text);
     
     return (
       <View style={[
@@ -281,6 +337,13 @@ export default function ChatScreen() {
             ? [styles.currentUserBubble, { backgroundColor: colors.primary }] 
             : [styles.otherUserBubble, { backgroundColor: colors.card, borderColor: colors.border }]
         ]}>
+          {/* ✅ NEW: Show heart icon for supportive messages */}
+          {isSupportive && !isCurrentUser && (
+            <View style={styles.supportiveIndicator}>
+              <Heart size={12} color="#10b981" fill="#10b981" />
+            </View>
+          )}
+          
           <Text style={[
             styles.messageText,
             { color: isCurrentUser ? 'white' : colors.text }
@@ -368,6 +431,26 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* ✅ NEW: Moderation Warning Banner */}
+      {showModerationWarning && (
+        <View style={[styles.moderationWarning, { backgroundColor: '#fef2f2', borderColor: '#fecaca' }]}>
+          <View style={styles.moderationContent}>
+            <AlertTriangle size={16} color="#dc2626" />
+            <Text style={[styles.moderationText, { color: '#dc2626' }]}>
+              {moderationMessage}
+            </Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.suggestionButton}
+            onPress={showPositiveSuggestions}
+          >
+            <Text style={[styles.suggestionButtonText, { color: '#dc2626' }]}>
+              Get Help
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Messages */}
       <FlatList
         ref={flatListRef}
@@ -438,6 +521,10 @@ export default function ChatScreen() {
             maxLength={300}
             textAlignVertical="top"
             onFocus={() => {
+              // Hide warning when user starts typing again
+              if (showModerationWarning) {
+                setShowModerationWarning(false);
+              }
               setTimeout(() => {
                 flatListRef.current?.scrollToEnd({ animated: true });
               }, 200);
@@ -524,6 +611,37 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
+  // ✅ NEW: Moderation warning styles
+  moderationWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  moderationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  moderationText: {
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  suggestionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+  },
+  suggestionButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  
   // Messages
   messagesList: {
     flex: 1,
@@ -552,6 +670,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 20,
     borderWidth: 1,
+    position: 'relative',
   },
   currentUserBubble: {
     borderBottomRightRadius: 6,
@@ -560,6 +679,22 @@ const styles = StyleSheet.create({
   otherUserBubble: {
     borderBottomLeftRadius: 6,
   },
+  
+  // ✅ NEW: Supportive message indicator
+  supportiveIndicator: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  
   messageText: {
     fontSize: 15,
     lineHeight: 20,
