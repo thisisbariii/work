@@ -69,7 +69,11 @@ workflows:
           org.gradle.jvmargs=-Xmx4096m
           android.useAndroidX=true
           android.enableJetifier=true
+          hermesEnabled=true
           EOF
+          
+          # Fix hermesEnabled error in app/build.gradle
+          sed -i 's/hermesEnabled/project.findProperty("hermesEnabled") ?: true/g' app/build.gradle
           
           ./gradlew assembleDebug
           
