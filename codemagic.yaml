@@ -1,7 +1,7 @@
 workflows:
   react-native-android:
     name: Untold App - Android APK
-    max_build_duration: 60
+    max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
       events:
@@ -15,78 +15,164 @@ workflows:
         - env
       node: 18
       java: 17
+      vars:
+        EXPO_NO_CAPABILITY_SYNC: 1
+        EXPO_NO_GIT_STATUS: 1
     scripts:
-      - name: Check files
+      - name: Check project structure
         script: |
-          echo "Checking project structure..."
+          echo "=== Project Structure ==="
           ls -la
-          cat package.json | head -20
-          cat app.json | head -30
+          echo "=== Package.json dependencies ==="
+          cat package.json | grep -A 30 '"dependencies"' || echo "No dependencies section"
+          echo "=== App.json config ==="
+          cat app.json
       
       - name: Install dependencies
         script: |
+          echo "=== Cleaning npm cache ==="
           npm cache clean --force
-          npm ci
+          echo "=== Installing dependencies ==="
+          npm ci --legacy-peer-deps
       
-      - name: Install Expo CLI
+      - name: Install and configure Expo
         script: |
+          echo "=== Installing Expo CLI ==="
           npm install -g @expo/cli@latest
+          echo "=== Expo version ==="
+          npx expo --version
       
-      - name: Remove old builds
+      - name: Clean previous builds
         script: |
+          echo "=== Removing old builds ==="
           rm -rf android ios .expo
+          rm -rf node_modules/.cache
       
-      - name: Fix app.json before prebuild
+      - name: Create minimal app.json
         script: |
-          echo "Original app.json content:"
-          cat app.json
-          # Remove the kotlinVersion line completely
-          sed -i.bak 's/"kotlinVersion": "1.9.24",//g' app.json
-          sed -i.bak 's/"kotlinVersion": "1.9.24"//g' app.json
-          echo "Modified app.json content:"
+          echo "=== Creating minimal app.json ==="
+          cat > app.json << 'EOF'
+          {
+            "expo": {
+              "name": "Untold Share Heal",
+              "slug": "untold-app",
+              "version": "1.0.0",
+              "orientation": "portrait",
+              "scheme": "untold",
+              "userInterfaceStyle": "automatic",
+              "newArchEnabled": false,
+              "android": {
+                "package": "com.untold.shareapp",
+                "versionCode": 1,
+                "permissions": [
+                  "android.permission.INTERNET",
+                  "android.permission.ACCESS_NETWORK_STATE",
+                  "android.permission.CAMERA",
+                  "android.permission.RECORD_AUDIO"
+                ]
+              },
+              "plugins": [
+                "expo-router",
+                [
+                  "expo-build-properties",
+                  {
+                    "android": {
+                      "compileSdkVersion": 34,
+                      "targetSdkVersion": 34,
+                      "minSdkVersion": 24,
+                      "enableProguardInReleaseBuilds": false,
+                      "enableShrinkResourcesInReleaseBuilds": false
+                    }
+                  }
+                ]
+              ],
+              "extra": {
+                "eas": {
+                  "projectId": "placeholder-id"
+                }
+              }
+            }
+          }
+          EOF
+          echo "=== New app.json content ==="
           cat app.json
       
-      - name: Prebuild Android
+      - name: Prebuild Android with verbose output
         script: |
-          npx expo prebuild --platform android --clean --no-install
+          echo "=== Starting prebuild ==="
+          npx expo prebuild --platform android --clean --no-install --verbose
       
-      - name: Force Kotlin version in Gradle
+      - name: Configure Android build
         script: |
           cd android
-          # Add Kotlin version to gradle.properties
-          echo "kotlin.version=1.9.10" >> gradle.properties
-          echo "android.defaults.buildfeatures.buildconfig=true" >> gradle.properties
-          echo "android.nonTransitiveRClass=false" >> gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
-          echo "android.useAndroidX=true" >> gradle.properties
-          
-          # Force Kotlin version in root build.gradle
-          sed -i.bak 's/kotlin("android") version "1.9.24"/kotlin("android") version "1.9.10"/g' build.gradle
-          sed -i.bak 's/kotlin_version = "1.9.24"/kotlin_version = "1.9.10"/g' build.gradle
-          
-          echo "Modified gradle.properties:"
+          echo "=== Current gradle.properties ==="
           cat gradle.properties
-          echo "Modified build.gradle:"
-          cat build.gradle | head -50
+          
+          echo "=== Adding safe build configurations ==="
+          cat >> gradle.properties << 'EOF'
+          
+          # Build optimizations
+          kotlin.version=1.9.10
+          android.useAndroidX=true
+          android.enableJetifier=true
+          android.defaults.buildfeatures.buildconfig=true
+          android.nonTransitiveRClass=false
+          android.enableR8.fullMode=false
+          android.enableDexingArtifactTransform.desugaring=false
+          
+          # Memory settings
+          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m
+          org.gradle.parallel=true
+          org.gradle.daemon=true
+          org.gradle.configureondemand=true
+          EOF
+          
+          echo "=== Updated gradle.properties ==="
+          cat gradle.properties
+          
+          echo "=== Checking app/build.gradle ==="
+          if [ -f "app/build.gradle" ]; then
+            # Disable problematic optimizations
+            sed -i.bak 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
+            sed -i.bak 's/shrinkResources true/shrinkResources false/g' app/build.gradle
+            echo "=== Modified app/build.gradle release section ==="
+            grep -A 15 -B 5 "release {" app/build.gradle || echo "No release section found"
+          fi
       
-      - name: Set Gradle permissions
+      - name: Set permissions and clean
         script: |
           cd android
           chmod +x ./gradlew
+          echo "=== Gradle version ==="
+          ./gradlew --version
+          echo "=== Cleaning project ==="
+          ./gradlew clean --stacktrace --info
       
-      - name: Clean Gradle
+      - name: Build debug APK first
         script: |
           cd android
-          ./gradlew clean --stacktrace
+          echo "=== Building debug APK to verify setup ==="
+          ./gradlew assembleDebug --stacktrace --info --no-daemon
+          echo "=== Debug build completed ==="
+          ls -la app/build/outputs/apk/debug/ || echo "No debug APK found"
       
-      - name: Build Android APK
+      - name: Build release APK
         script: |
           cd android
-          ./gradlew assembleRelease --no-daemon --stacktrace --info
+          echo "=== Building release APK ==="
+          ./gradlew assembleRelease --stacktrace --info --no-daemon
+          echo "=== Release build completed ==="
+          ls -la app/build/outputs/apk/release/ || echo "No release APK found"
+      
+      - name: Verify build outputs
+        script: |
+          echo "=== Build outputs ==="
+          find android/app/build/outputs -name "*.apk" -type f || echo "No APK files found"
     
     artifacts:
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/mapping.txt
+      - android/app/build/reports/**/*
     
     publishing:
       email:

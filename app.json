@@ -1,62 +1,23 @@
 {
-  "expo": {
-    "name": "Untold - Share & Heal",
-    "slug": "untold-app",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "scheme": "untold",
-    "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.untold.shareapp"
-    },
-    "android": {
-      "package": "com.untold.shareapp",
-      "versionCode": 1,
-      "permissions": [
-        "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.VIBRATE",
-        "android.permission.WAKE_LOCK"
-      ]
-    },
-    "web": {
-      "bundler": "metro",
-      "output": "single"
-    },
-    "plugins": [
-      "expo-router",
-      "expo-font",
-      "expo-web-browser",
-      "expo-camera",
-      "expo-av",
-      "expo-notifications",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "enableProguardInReleaseBuilds": false,
-            "enableShrinkResourcesInReleaseBuilds": false,
-            "compileSdkVersion": 34,
-            "targetSdkVersion": 34,
-            "minSdkVersion": 24
-          }
-        }
-      ]
-    ],
-    "experiments": {
-      "typedRoutes": true
-    },
-    "extra": {
-      "router": {
-        "origin": false
-      },
-      "eas": {
-        "projectId": "your-project-id-here"
-      }
-    }
-  }
+  "name": "untold-app",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "expo": "~51.0.28",
+    "expo-router": "~3.5.23",
+    "react": "18.2.0",
+    "react-native": "0.74.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@types/react": "~18.2.45",
+    "typescript": "~5.3.3"
+  },
+  "private": true
 }
