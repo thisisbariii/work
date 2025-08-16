@@ -75,17 +75,26 @@ workflows:
           # Fix hermesEnabled error in app/build.gradle
           sed -i 's/hermesEnabled/project.findProperty("hermesEnabled") ?: true/g' app/build.gradle
           
-          # Fix splash screen resource error
+          # Fix all missing resource errors
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <color name="splashscreen_background">#667eea</color>
+              <color name="colorPrimary">#667eea</color>
+              <color name="colorPrimaryDark">#5a6fd8</color>
+              <color name="colorAccent">#667eea</color>
           </resources>
           EOF
           
-          # Remove problematic splash screen file if it exists
-          rm -f app/src/main/res/drawable/splashscreen.xml
+          cat > app/src/main/res/drawable/splashscreen.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="@color/splashscreen_background" />
+          </layer-list>
+          EOF
           
           ./gradlew assembleDebug
           
