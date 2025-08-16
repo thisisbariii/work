@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Untold App - Kotlin Fix
+    name: Untold App - Fixed Artifacts
     max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
@@ -26,7 +26,7 @@ workflows:
           npm install -g @expo/cli@latest
           npx expo --version
       
-      - name: Create minimal app.json without problematic plugins
+      - name: Create minimal app.json
         script: |
           cat > app.json << 'EOF'
           {
@@ -42,12 +42,11 @@ workflows:
             }
           }
           EOF
-          echo "Created minimal app.json without expo-router:"
+          echo "Created minimal app.json:"
           cat app.json
       
       - name: Create basic app structure
         script: |
-          # Create basic React Native structure instead of expo-router
           mkdir -p src
           cat > App.tsx << 'EOF'
           import React from 'react';
@@ -74,85 +73,71 @@ workflows:
             },
           });
           EOF
-          
-          # Remove expo-router related files that might cause Kotlin compilation issues
           rm -rf app/
       
-      - name: Prebuild with minimal config
+      - name: Prebuild Android
         script: |
           rm -rf android ios .expo
           npx expo prebuild --platform android --clean --no-install
-          
-          echo "Checking generated android structure:"
-          ls -la android/
-          ls -la android/app/src/main/java/ || echo "No java folder"
       
-      - name: Fix Kotlin compilation issues
+      - name: Fix Kotlin and build configuration
         script: |
           cd android
           
-          # Set specific Kotlin version that's known to work
           cat > gradle.properties << 'EOF'
-          # Gradle properties
           org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m
           org.gradle.parallel=true
           org.gradle.daemon=true
-          
-          # Android properties
           android.useAndroidX=true
           android.enableJetifier=true
           android.defaults.buildfeatures.buildconfig=true
           android.nonTransitiveRClass=false
           android.enableR8.fullMode=false
-          
-          # Kotlin version fix
           kotlin.version=1.8.22
           EOF
           
-          # Update root build.gradle to use compatible Kotlin version
           if [ -f "build.gradle" ]; then
-            echo "Updating root build.gradle..."
             sed -i.bak 's/kotlin("android") version "[^"]*"/kotlin("android") version "1.8.22"/g' build.gradle
             sed -i.bak 's/kotlin_version = "[^"]*"/kotlin_version = "1.8.22"/g' build.gradle
-            
-            # Also ensure buildscript has correct version
             sed -i.bak 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.8.22"/g' build.gradle
-            
-            echo "Modified build.gradle:"
-            head -30 build.gradle
           fi
           
-          # Update app build.gradle
           if [ -f "app/build.gradle" ]; then
-            echo "Checking app/build.gradle..."
-            # Disable any problematic features
             sed -i.bak 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
             sed -i.bak 's/shrinkResources true/shrinkResources false/g' app/build.gradle
           fi
           
           chmod +x ./gradlew
       
-      - name: Clean and test Kotlin compilation
+      - name: Clean and build APK
         script: |
           cd android
-          echo "Cleaning project..."
           ./gradlew clean
+          ./gradlew assembleDebug --stacktrace
           
-          echo "Testing Kotlin compilation with specific task..."
-          ./gradlew compileDebugKotlin --stacktrace --info || echo "Kotlin compilation failed, continuing..."
+          echo "=== Checking for APK files ==="
+          find . -name "*.apk" -type f
+          ls -la app/build/outputs/apk/debug/ || echo "Debug folder not found"
+          ls -la app/build/outputs/apk/ || echo "APK folder not found"
       
-      - name: Build debug APK
+      - name: Copy APK to root for easier access
         script: |
           cd android
-          echo "Building debug APK..."
-          ./gradlew assembleDebug --stacktrace --info
+          echo "=== Copying APK to project root ==="
+          find . -name "*.apk" -exec cp {} ../untold-app.apk \;
+          ls -la ../untold-app.apk || echo "APK copy failed"
           
-          echo "Checking outputs:"
-          find app/build/outputs -name "*.apk" -type f || echo "No APK found"
+          # Also copy to a standard location
+          mkdir -p ../build-outputs
+          find . -name "*.apk" -exec cp {} ../build-outputs/ \;
+          ls -la ../build-outputs/
     
     artifacts:
+      - untold-app.apk
+      - build-outputs/**/*
       - android/app/build/outputs/**/*.apk
-      - android/app/build/logs/**/*
+      - android/app/build/outputs/apk/debug/*.apk
+      - android/app/build/outputs/apk/release/*.apk
     
     publishing:
       email:
