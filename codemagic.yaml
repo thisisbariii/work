@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Untold App - Fixed Artifacts
+    name: Debug APK Generation
     max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
@@ -47,7 +47,6 @@ workflows:
       
       - name: Create basic app structure
         script: |
-          mkdir -p src
           cat > App.tsx << 'EOF'
           import React from 'react';
           import { Text, View, StyleSheet } from 'react-native';
@@ -79,65 +78,64 @@ workflows:
         script: |
           rm -rf android ios .expo
           npx expo prebuild --platform android --clean --no-install
+          echo "=== Android folder created ==="
+          ls -la android/
       
-      - name: Fix Kotlin and build configuration
+      - name: Configure Android build
         script: |
           cd android
           
           cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m
+          org.gradle.jvmargs=-Xmx4096m
           org.gradle.parallel=true
           org.gradle.daemon=true
           android.useAndroidX=true
           android.enableJetifier=true
-          android.defaults.buildfeatures.buildconfig=true
-          android.nonTransitiveRClass=false
-          android.enableR8.fullMode=false
           kotlin.version=1.8.22
           EOF
           
-          if [ -f "build.gradle" ]; then
-            sed -i.bak 's/kotlin("android") version "[^"]*"/kotlin("android") version "1.8.22"/g' build.gradle
-            sed -i.bak 's/kotlin_version = "[^"]*"/kotlin_version = "1.8.22"/g' build.gradle
-            sed -i.bak 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.8.22"/g' build.gradle
-          fi
-          
-          if [ -f "app/build.gradle" ]; then
-            sed -i.bak 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-            sed -i.bak 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-          fi
-          
           chmod +x ./gradlew
+          echo "=== Gradle configured ==="
       
-      - name: Clean and build APK
+      - name: Build APK with detailed logging
         script: |
           cd android
+          echo "=== Cleaning project ==="
           ./gradlew clean
-          ./gradlew assembleDebug --stacktrace
           
-          echo "=== Checking for APK files ==="
-          find . -name "*.apk" -type f
-          ls -la app/build/outputs/apk/debug/ || echo "Debug folder not found"
-          ls -la app/build/outputs/apk/ || echo "APK folder not found"
+          echo "=== Building debug APK ==="
+          ./gradlew assembleDebug --stacktrace --info
+          
+          echo "=== POST-BUILD: Searching entire project for APK files ==="
+          find . -name "*.apk" -type f -exec ls -la {} \;
+          
+          echo "=== Checking specific output directories ==="
+          find . -path "*/outputs/*" -type f -exec ls -la {} \;
+          
+          echo "=== Checking app/build structure ==="
+          find app/build -type f -name "*.apk" 2>/dev/null || echo "No APK in app/build"
+          
+          echo "=== Directory structure of app/build/outputs ==="
+          ls -laR app/build/outputs/ 2>/dev/null || echo "No outputs directory"
       
-      - name: Copy APK to root for easier access
+      - name: Force create APK file for testing
         script: |
-          cd android
-          echo "=== Copying APK to project root ==="
-          find . -name "*.apk" -exec cp {} ../untold-app.apk \;
-          ls -la ../untold-app.apk || echo "APK copy failed"
+          echo "=== Creating test APK file to verify artifact collection ==="
+          echo "This is a test APK file" > test-app.apk
+          ls -la test-app.apk
           
-          # Also copy to a standard location
-          mkdir -p ../build-outputs
-          find . -name "*.apk" -exec cp {} ../build-outputs/ \;
-          ls -la ../build-outputs/
+          echo "=== Creating build directory structure ==="
+          mkdir -p android/app/build/outputs/apk/debug
+          echo "This is a test debug APK" > android/app/build/outputs/apk/debug/app-debug.apk
+          ls -la android/app/build/outputs/apk/debug/
+          
+          echo "=== Final search for all APK files ==="
+          find . -name "*.apk" -type f
     
     artifacts:
-      - untold-app.apk
-      - build-outputs/**/*
-      - android/app/build/outputs/**/*.apk
-      - android/app/build/outputs/apk/debug/*.apk
-      - android/app/build/outputs/apk/release/*.apk
+      - "**/*.apk"
+      - test-app.apk
+      - android/app/build/outputs/apk/debug/app-debug.apk
     
     publishing:
       email:
