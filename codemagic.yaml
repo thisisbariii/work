@@ -15,164 +15,75 @@ workflows:
         - env
       node: 18
       java: 17
-      vars:
-        EXPO_NO_CAPABILITY_SYNC: 1
-        EXPO_NO_GIT_STATUS: 1
     scripts:
-      - name: Check project structure
+      - name: Check environment
         script: |
-          echo "=== Project Structure ==="
+          echo "Node version: $(node --version)"
+          echo "NPM version: $(npm --version)"
+          echo "Java version: $(java -version)"
+          echo "Project files:"
           ls -la
-          echo "=== Package.json dependencies ==="
-          cat package.json | grep -A 30 '"dependencies"' || echo "No dependencies section"
-          echo "=== App.json config ==="
-          cat app.json
       
       - name: Install dependencies
         script: |
-          echo "=== Cleaning npm cache ==="
           npm cache clean --force
-          echo "=== Installing dependencies ==="
-          npm ci --legacy-peer-deps
+          npm install
       
-      - name: Install and configure Expo
+      - name: Install Expo CLI
         script: |
-          echo "=== Installing Expo CLI ==="
           npm install -g @expo/cli@latest
-          echo "=== Expo version ==="
           npx expo --version
       
-      - name: Clean previous builds
+      - name: Create super minimal app.json
         script: |
-          echo "=== Removing old builds ==="
-          rm -rf android ios .expo
-          rm -rf node_modules/.cache
-      
-      - name: Create minimal app.json
-        script: |
-          echo "=== Creating minimal app.json ==="
           cat > app.json << 'EOF'
           {
             "expo": {
-              "name": "Untold Share Heal",
+              "name": "UntoldApp",
               "slug": "untold-app",
               "version": "1.0.0",
-              "orientation": "portrait",
-              "scheme": "untold",
-              "userInterfaceStyle": "automatic",
-              "newArchEnabled": false,
               "android": {
-                "package": "com.untold.shareapp",
-                "versionCode": 1,
-                "permissions": [
-                  "android.permission.INTERNET",
-                  "android.permission.ACCESS_NETWORK_STATE",
-                  "android.permission.CAMERA",
-                  "android.permission.RECORD_AUDIO"
-                ]
+                "package": "com.untold.shareapp"
               },
-              "plugins": [
-                "expo-router",
-                [
-                  "expo-build-properties",
-                  {
-                    "android": {
-                      "compileSdkVersion": 34,
-                      "targetSdkVersion": 34,
-                      "minSdkVersion": 24,
-                      "enableProguardInReleaseBuilds": false,
-                      "enableShrinkResourcesInReleaseBuilds": false
-                    }
-                  }
-                ]
-              ],
-              "extra": {
-                "eas": {
-                  "projectId": "placeholder-id"
-                }
-              }
+              "plugins": ["expo-router"]
             }
           }
           EOF
-          echo "=== New app.json content ==="
+          echo "Created minimal app.json:"
           cat app.json
       
-      - name: Prebuild Android with verbose output
+      - name: Clean and prebuild
         script: |
-          echo "=== Starting prebuild ==="
-          npx expo prebuild --platform android --clean --no-install --verbose
+          rm -rf android ios .expo
+          echo "Running prebuild..."
+          npx expo prebuild --platform android --clean --no-install
+          echo "Prebuild completed. Checking android folder:"
+          ls -la android/
       
-      - name: Configure Android build
+      - name: Configure Gradle
         script: |
           cd android
-          echo "=== Current gradle.properties ==="
-          cat gradle.properties
-          
-          echo "=== Adding safe build configurations ==="
-          cat >> gradle.properties << 'EOF'
-          
-          # Build optimizations
-          kotlin.version=1.9.10
-          android.useAndroidX=true
-          android.enableJetifier=true
-          android.defaults.buildfeatures.buildconfig=true
-          android.nonTransitiveRClass=false
-          android.enableR8.fullMode=false
-          android.enableDexingArtifactTransform.desugaring=false
-          
-          # Memory settings
-          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m
-          org.gradle.parallel=true
-          org.gradle.daemon=true
-          org.gradle.configureondemand=true
-          EOF
-          
-          echo "=== Updated gradle.properties ==="
-          cat gradle.properties
-          
-          echo "=== Checking app/build.gradle ==="
-          if [ -f "app/build.gradle" ]; then
-            # Disable problematic optimizations
-            sed -i.bak 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-            sed -i.bak 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-            echo "=== Modified app/build.gradle release section ==="
-            grep -A 15 -B 5 "release {" app/build.gradle || echo "No release section found"
-          fi
-      
-      - name: Set permissions and clean
-        script: |
-          cd android
+          echo "Adding basic gradle properties..."
+          echo "org.gradle.jvmargs=-Xmx4096m" >> gradle.properties
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
           chmod +x ./gradlew
-          echo "=== Gradle version ==="
-          ./gradlew --version
-          echo "=== Cleaning project ==="
-          ./gradlew clean --stacktrace --info
       
-      - name: Build debug APK first
+      - name: Clean Gradle
         script: |
           cd android
-          echo "=== Building debug APK to verify setup ==="
-          ./gradlew assembleDebug --stacktrace --info --no-daemon
-          echo "=== Debug build completed ==="
-          ls -la app/build/outputs/apk/debug/ || echo "No debug APK found"
+          ./gradlew clean
       
-      - name: Build release APK
+      - name: Test Gradle build
         script: |
           cd android
-          echo "=== Building release APK ==="
-          ./gradlew assembleRelease --stacktrace --info --no-daemon
-          echo "=== Release build completed ==="
-          ls -la app/build/outputs/apk/release/ || echo "No release APK found"
-      
-      - name: Verify build outputs
-        script: |
-          echo "=== Build outputs ==="
-          find android/app/build/outputs -name "*.apk" -type f || echo "No APK files found"
+          echo "Testing basic gradle build..."
+          ./gradlew tasks --all | head -20
+          echo "Attempting debug build..."
+          ./gradlew assembleDebug --stacktrace
     
     artifacts:
       - android/app/build/outputs/**/*.apk
-      - android/app/build/outputs/**/mapping.txt
-      - android/app/build/reports/**/*
     
     publishing:
       email:
