@@ -18,6 +18,7 @@ workflows:
       - name: Install dependencies
         script: |
           npm install
+          npm uninstall expo-permissions --no-save
       - name: Install Expo CLI
         script: |
           npm install -g @expo/cli
