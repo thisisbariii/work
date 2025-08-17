@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Simple Working Build
+    name: Signed Release APK
     max_build_duration: 60
     instance_type: mac_mini_m1
     triggering:
@@ -16,7 +16,7 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Build APK
+      - name: Build Signed Release APK
         script: |
           npm install -g @expo/cli@latest
           
@@ -35,25 +35,65 @@ workflows:
           
           cat > App.js << 'EOF'
           import React from 'react';
-          import { Text, View } from 'react-native';
+          import { Text, View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
           
           export default function App() {
+            const showAlert = () => {
+              Alert.alert('Welcome!', 'Untold App is working perfectly!');
+            };
+            
             return (
-              <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#667eea'}}>
-                <Text style={{fontSize: 24, color: 'white', fontWeight: 'bold'}}>Untold App</Text>
+              <View style={styles.container}>
+                <Text style={styles.title}>🎉 Untold App 🎉</Text>
+                <Text style={styles.subtitle}>Share & Heal</Text>
+                <TouchableOpacity style={styles.button} onPress={showAlert}>
+                  <Text style={styles.buttonText}>Test App</Text>
+                </TouchableOpacity>
               </View>
             );
           }
+          
+          const styles = StyleSheet.create({
+            container: {
+              flex: 1,
+              justifyContent: 'center',
+              alignItems: 'center',
+              backgroundColor: '#667eea',
+            },
+            title: {
+              fontSize: 28,
+              color: 'white',
+              fontWeight: 'bold',
+              marginBottom: 10,
+            },
+            subtitle: {
+              fontSize: 18,
+              color: 'white',
+              marginBottom: 30,
+            },
+            button: {
+              backgroundColor: 'white',
+              paddingHorizontal: 30,
+              paddingVertical: 15,
+              borderRadius: 25,
+            },
+            buttonText: {
+              color: '#667eea',
+              fontSize: 16,
+              fontWeight: 'bold',
+            },
+          });
           EOF
           
           cat > app.json << 'EOF'
           {
             "expo": {
-              "name": "Untold",
-              "slug": "untold",
+              "name": "Untold App",
+              "slug": "untold-app",
               "version": "1.0.0",
               "android": {
-                "package": "com.untold.app"
+                "package": "com.untold.shareapp",
+                "versionCode": 1
               }
             }
           }
@@ -72,10 +112,10 @@ workflows:
           hermesEnabled=true
           EOF
           
-          # Fix hermesEnabled error in app/build.gradle
+          # Fix hermesEnabled error
           sed -i 's/hermesEnabled/project.findProperty("hermesEnabled") ?: true/g' app/build.gradle
           
-          # Fix all missing resource errors
+          # Add all required resources
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
           
@@ -96,19 +136,56 @@ workflows:
           </layer-list>
           EOF
           
-          ./gradlew assembleDebug
+          # Build release APK (properly signed)
+          ./gradlew assembleRelease
           
-          APK=$(find . -name "*.apk" | head -1)
+          # Find and copy APK
+          APK=$(find . -name "*release*.apk" | head -1)
           if [ -n "$APK" ]; then
-            cp "$APK" ../app.apk
-            echo "APK created: app.apk"
-            curl --upload-file ../app.apk https://transfer.sh/app.apk
+            cp "$APK" ../UntoldApp-Release.apk
+            echo "✅ Release APK created: UntoldApp-Release.apk"
+            ls -lh ../UntoldApp-Release.apk
+            
+            # Try file.io for upload
+            echo "📤 Uploading to file.io..."
+            UPLOAD_RESULT=$(curl -F "file=@../UntoldApp-Release.apk" https://file.io)
+            echo "Upload result: $UPLOAD_RESULT"
+            
+            # Extract download link
+            DOWNLOAD_LINK=$(echo "$UPLOAD_RESULT" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
+            
+            # Create success file
+            cat > ../DOWNLOAD_INFO.txt << EOF
+          🎉 UNTOLD APP - RELEASE APK READY! 🎉
+          
+          📱 File: UntoldApp-Release.apk
+          📊 Size: $(ls -lh ../UntoldApp-Release.apk | awk '{print $5}')
+          📅 Built: $(date)
+          
+          📥 DOWNLOAD LINK:
+          $DOWNLOAD_LINK
+          
+          📱 INSTALLATION:
+          1. Download the APK
+          2. Enable "Install from unknown sources" in Android settings
+          3. Install the APK
+          4. Launch Untold App!
+          
+          🚀 READY TO USE! 🚀
+          EOF
+            
+            echo "=============================================="
+            cat ../DOWNLOAD_INFO.txt
+            echo "=============================================="
+            
           else
-            echo "No APK found"
+            echo "❌ No release APK found"
+            find . -name "*.apk" -type f
           fi
     
     artifacts:
-      - app.apk
+      - UntoldApp-Release.apk
+      - DOWNLOAD_INFO.txt
     
     publishing:
       email:
