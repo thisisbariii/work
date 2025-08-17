@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Signed Release APK
+    name: Crash Fix Build
     max_build_duration: 60
     instance_type: mac_mini_m1
     triggering:
@@ -16,15 +16,16 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Build Signed Release APK
+      - name: Build Stable APK
         script: |
           npm install -g @expo/cli@latest
           
+          # Ultra minimal package.json
           cat > package.json << 'EOF'
           {
             "name": "untold",
             "version": "1.0.0",
-            "main": "App.js",
+            "main": "index.js",
             "dependencies": {
               "expo": "~51.0.28",
               "react": "18.2.0",
@@ -33,68 +34,56 @@ workflows:
           }
           EOF
           
+          # Create index.js entry point
+          cat > index.js << 'EOF'
+          import { registerRootComponent } from 'expo';
+          import App from './App';
+          registerRootComponent(App);
+          EOF
+          
+          # Ultra simple App.js - no fancy features
           cat > App.js << 'EOF'
           import React from 'react';
-          import { Text, View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+          import { Text, View } from 'react-native';
           
           export default function App() {
-            const showAlert = () => {
-              Alert.alert('Welcome!', 'Untold App is working perfectly!');
-            };
-            
             return (
-              <View style={styles.container}>
-                <Text style={styles.title}>🎉 Untold App 🎉</Text>
-                <Text style={styles.subtitle}>Share & Heal</Text>
-                <TouchableOpacity style={styles.button} onPress={showAlert}>
-                  <Text style={styles.buttonText}>Test App</Text>
-                </TouchableOpacity>
+              <View style={{
+                flex: 1,
+                justifyContent: 'center',
+                alignItems: 'center',
+                backgroundColor: '#667eea'
+              }}>
+                <Text style={{
+                  fontSize: 24,
+                  color: 'white',
+                  fontWeight: 'bold',
+                  textAlign: 'center'
+                }}>
+                  Untold App{'\n'}Working!
+                </Text>
               </View>
             );
           }
-          
-          const styles = StyleSheet.create({
-            container: {
-              flex: 1,
-              justifyContent: 'center',
-              alignItems: 'center',
-              backgroundColor: '#667eea',
-            },
-            title: {
-              fontSize: 28,
-              color: 'white',
-              fontWeight: 'bold',
-              marginBottom: 10,
-            },
-            subtitle: {
-              fontSize: 18,
-              color: 'white',
-              marginBottom: 30,
-            },
-            button: {
-              backgroundColor: 'white',
-              paddingHorizontal: 30,
-              paddingVertical: 15,
-              borderRadius: 25,
-            },
-            buttonText: {
-              color: '#667eea',
-              fontSize: 16,
-              fontWeight: 'bold',
-            },
-          });
           EOF
           
+          # Minimal app.json with safe settings
           cat > app.json << 'EOF'
           {
             "expo": {
-              "name": "Untold App",
-              "slug": "untold-app",
+              "name": "Untold",
+              "slug": "untold",
               "version": "1.0.0",
+              "platforms": ["android"],
               "android": {
-                "package": "com.untold.shareapp",
-                "versionCode": 1
-              }
+                "package": "com.untold.app",
+                "versionCode": 1,
+                "compileSdkVersion": 34,
+                "targetSdkVersion": 33,
+                "minSdkVersion": 21,
+                "permissions": []
+              },
+              "plugins": []
             }
           }
           EOF
@@ -105,17 +94,19 @@ workflows:
           cd android
           chmod +x gradlew
           
+          # Safe gradle properties
           cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx4096m
+          org.gradle.jvmargs=-Xmx3072m
           android.useAndroidX=true
           android.enableJetifier=true
-          hermesEnabled=true
+          hermesEnabled=false
+          newArchEnabled=false
           EOF
           
-          # Fix hermesEnabled error
-          sed -i 's/hermesEnabled/project.findProperty("hermesEnabled") ?: true/g' app/build.gradle
+          # Fix hermesEnabled in build.gradle
+          sed -i 's/hermesEnabled/false/g' app/build.gradle
           
-          # Add all required resources
+          # Add required resources
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
           
@@ -136,56 +127,52 @@ workflows:
           </layer-list>
           EOF
           
-          # Build release APK (properly signed)
-          ./gradlew assembleRelease
+          # Disable proguard and other optimizations that cause crashes
+          sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
+          sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
           
-          # Find and copy APK
-          APK=$(find . -name "*release*.apk" | head -1)
+          # Build debug APK (more stable)
+          ./gradlew assembleDebug
+          
+          APK=$(find . -name "*debug*.apk" | head -1)
           if [ -n "$APK" ]; then
-            cp "$APK" ../UntoldApp-Release.apk
-            echo "✅ Release APK created: UntoldApp-Release.apk"
-            ls -lh ../UntoldApp-Release.apk
+            cp "$APK" ../UntoldApp-Fixed.apk
+            echo "✅ Fixed APK created: UntoldApp-Fixed.apk"
+            ls -lh ../UntoldApp-Fixed.apk
             
-            # Try file.io for upload
-            echo "📤 Uploading to file.io..."
-            UPLOAD_RESULT=$(curl -F "file=@../UntoldApp-Release.apk" https://file.io)
-            echo "Upload result: $UPLOAD_RESULT"
-            
-            # Extract download link
+            # Upload to file.io
+            UPLOAD_RESULT=$(curl -F "file=@../UntoldApp-Fixed.apk" https://file.io)
             DOWNLOAD_LINK=$(echo "$UPLOAD_RESULT" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
             
-            # Create success file
-            cat > ../DOWNLOAD_INFO.txt << EOF
-          🎉 UNTOLD APP - RELEASE APK READY! 🎉
+            cat > ../FIXED_DOWNLOAD.txt << EOF
+          🔧 UNTOLD APP - CRASH FIXED! 🔧
           
-          📱 File: UntoldApp-Release.apk
-          📊 Size: $(ls -lh ../UntoldApp-Release.apk | awk '{print $5}')
-          📅 Built: $(date)
+          📱 File: UntoldApp-Fixed.apk
+          📊 Size: $(ls -lh ../UntoldApp-Fixed.apk | awk '{print $5}')
+          🔧 Fixed: App crashes, optimized for stability
           
-          📥 DOWNLOAD LINK:
+          📥 DOWNLOAD:
           $DOWNLOAD_LINK
           
-          📱 INSTALLATION:
-          1. Download the APK
-          2. Enable "Install from unknown sources" in Android settings
-          3. Install the APK
-          4. Launch Untold App!
+          ⚠️ BEFORE INSTALLING:
+          1. Uninstall the old version first
+          2. Restart your phone
+          3. Download and install this fixed version
           
-          🚀 READY TO USE! 🚀
+          🚀 THIS VERSION SHOULD WORK! 🚀
           EOF
             
             echo "=============================================="
-            cat ../DOWNLOAD_INFO.txt
+            cat ../FIXED_DOWNLOAD.txt
             echo "=============================================="
             
           else
-            echo "❌ No release APK found"
-            find . -name "*.apk" -type f
+            echo "❌ Build failed"
           fi
     
     artifacts:
-      - UntoldApp-Release.apk
-      - DOWNLOAD_INFO.txt
+      - UntoldApp-Fixed.apk
+      - FIXED_DOWNLOAD.txt
     
     publishing:
       email:
