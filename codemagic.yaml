@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Simple Basic Build
+    name: Untold App - Android APK
     max_build_duration: 60
     instance_type: mac_mini_m1
     triggering:
@@ -14,68 +14,28 @@ workflows:
       groups:
         - env
       node: 18
-      java: 17
     scripts:
-      - name: Build APK
+      - name: Install dependencies
         script: |
-          npm install -g @expo/cli@latest
-          
-          cat > package.json << 'EOF'
-          {
-            "name": "untold",
-            "version": "1.0.0",
-            "main": "App.js",
-            "dependencies": {
-              "expo": "~50.0.0",
-              "react": "18.2.0",
-              "react-native": "0.73.6"
-            }
-          }
-          EOF
-          
-          cat > App.js << 'EOF'
-          import React from 'react';
-          import { Text, View } from 'react-native';
-          
-          export default function App() {
-            return (
-              <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#667eea'}}>
-                <Text style={{fontSize: 24, color: 'white', fontWeight: 'bold'}}>Untold App</Text>
-              </View>
-            );
-          }
-          EOF
-          
-          cat > app.json << 'EOF'
-          {
-            "expo": {
-              "name": "Untold",
-              "slug": "untold",
-              "version": "1.0.0",
-              "android": {
-                "package": "com.untold.app"
-              }
-            }
-          }
-          EOF
-          
           npm install
+      - name: Install Expo CLI
+        script: |
+          npm install -g @expo/cli
+      - name: Expo prebuild
+        script: |
           npx expo prebuild --platform android --clean
-          
+      - name: Build Android APK
+        script: |
           cd android
-          chmod +x gradlew
-          
-          # Fix the bundle loading issue
-          echo "react.gradle.bundleAssetName=index.android.bundle" >> gradle.properties
-          
-          ./gradlew assembleDebug
-          
-          APK=$(find . -name "*.apk" | head -1)
-          if [ -n "$APK" ]; then
-            cp "$APK" ../app.apk
-            echo "APK created"
-            curl --upload-file ../app.apk https://file.io
-          fi
-    
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
     artifacts:
-      - app.apk
+      - android/app/build/outputs/**/*.apk
+      - android/app/build/outputs/**/mapping.txt
+    publishing:
+      email:
+        recipients:
+          - skbad911@gmail.com
+        notify:
+          success: true
+          failure: true
