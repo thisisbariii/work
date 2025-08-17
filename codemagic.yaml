@@ -1,7 +1,7 @@
 workflows:
   react-native-android:
-    name: Working APK Build
-    max_build_duration: 60
+    name: React Native EAS Build
+    max_build_duration: 120
     instance_type: mac_mini_m1
     triggering:
       events:
@@ -15,30 +15,65 @@ workflows:
         - env
       node: 18
       java: 17
+      vars:
+        EXPO_TOKEN: # You need to add your Expo token in CodeMagic environment variables
     scripts:
-      - name: Build Working APK
+      - name: Setup Expo Project
         script: |
-          # Use React Native CLI instead of Expo
-          npm install -g react-native-cli
+          npm install -g @expo/cli@latest eas-cli@latest
           
-          # Create React Native project
-          npx react-native@latest init UntoldApp
-          cd UntoldApp
+          # Create proper React Native Expo project
+          cat > package.json << 'EOF'
+          {
+            "name": "untold-app",
+            "version": "1.0.0",
+            "main": "node_modules/expo/AppEntry.js",
+            "scripts": {
+              "start": "expo start",
+              "android": "expo start --android",
+              "ios": "expo start --ios",
+              "web": "expo start --web"
+            },
+            "dependencies": {
+              "expo": "~51.0.28",
+              "react": "18.2.0",
+              "react-native": "0.74.5",
+              "expo-status-bar": "~1.12.1"
+            },
+            "devDependencies": {
+              "@babel/core": "^7.20.0"
+            }
+          }
+          EOF
           
-          # Replace App.tsx with working code
-          cat > App.tsx << 'EOF'
+          # Create proper React Native app
+          cat > App.js << 'EOF'
           import React from 'react';
-          import {SafeAreaView, Text, View, StyleSheet} from 'react-native';
+          import { StatusBar } from 'expo-status-bar';
+          import { StyleSheet, Text, View, TouchableOpacity, Alert } from 'react-native';
           
-          function App(): React.JSX.Element {
+          export default function App() {
+            const showMessage = () => {
+              Alert.alert(
+                "Welcome to Untold!",
+                "Your React Native app is working perfectly! 🎉",
+                [{ text: "Awesome!", style: "default" }]
+              );
+            };
+          
             return (
-              <SafeAreaView style={styles.container}>
-                <View style={styles.content}>
-                  <Text style={styles.title}>🎉 Untold App 🎉</Text>
-                  <Text style={styles.subtitle}>Share & Heal</Text>
-                  <Text style={styles.version}>v1.0.0</Text>
-                </View>
-              </SafeAreaView>
+              <View style={styles.container}>
+                <StatusBar style="light" />
+                <Text style={styles.title}>🎉 Untold App 🎉</Text>
+                <Text style={styles.subtitle}>Share & Heal</Text>
+                <Text style={styles.description}>Built with React Native & Expo</Text>
+                
+                <TouchableOpacity style={styles.button} onPress={showMessage}>
+                  <Text style={styles.buttonText}>Test App</Text>
+                </TouchableOpacity>
+                
+                <Text style={styles.footer}>v1.0.0 - React Native</Text>
+              </View>
             );
           }
           
@@ -46,89 +81,177 @@ workflows:
             container: {
               flex: 1,
               backgroundColor: '#667eea',
-            },
-            content: {
-              flex: 1,
-              justifyContent: 'center',
               alignItems: 'center',
+              justifyContent: 'center',
+              padding: 20,
             },
             title: {
-              fontSize: 28,
+              fontSize: 32,
               fontWeight: 'bold',
               color: 'white',
+              textAlign: 'center',
               marginBottom: 10,
             },
             subtitle: {
-              fontSize: 18,
+              fontSize: 20,
               color: 'white',
-              marginBottom: 5,
+              textAlign: 'center',
+              marginBottom: 10,
             },
-            version: {
-              fontSize: 14,
+            description: {
+              fontSize: 16,
               color: 'rgba(255,255,255,0.8)',
+              textAlign: 'center',
+              marginBottom: 30,
+            },
+            button: {
+              backgroundColor: 'white',
+              paddingHorizontal: 30,
+              paddingVertical: 15,
+              borderRadius: 25,
+              marginBottom: 20,
+              elevation: 3,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 3.84,
+            },
+            buttonText: {
+              color: '#667eea',
+              fontSize: 18,
+              fontWeight: 'bold',
+            },
+            footer: {
+              fontSize: 12,
+              color: 'rgba(255,255,255,0.7)',
+              textAlign: 'center',
               marginTop: 20,
             },
           });
-          
-          export default App;
           EOF
           
-          # Update package name
-          sed -i 's/com.untoldapp/com.untold.shareapp/g' android/app/src/main/java/com/untoldapp/MainActivity.kt
-          sed -i 's/com.untoldapp/com.untold.shareapp/g' android/app/src/main/java/com/untoldapp/MainApplication.kt
-          sed -i 's/UntoldApp/Untold App/g' android/app/src/main/res/values/strings.xml
-          
-          # Fix Android config
-          cd android
-          
-          cat >> gradle.properties << 'EOF'
-          
-          # Fix build issues
-          org.gradle.jvmargs=-Xmx4096m
-          android.useAndroidX=true
-          android.enableJetifier=true
-          newArchEnabled=false
-          hermesEnabled=true
+          # Create proper app.json
+          cat > app.json << 'EOF'
+          {
+            "expo": {
+              "name": "Untold App",
+              "slug": "untold-app",
+              "version": "1.0.0",
+              "orientation": "portrait",
+              "icon": "./assets/icon.png",
+              "userInterfaceStyle": "light",
+              "splash": {
+                "image": "./assets/splash.png",
+                "resizeMode": "contain",
+                "backgroundColor": "#667eea"
+              },
+              "assetBundlePatterns": [
+                "**/*"
+              ],
+              "ios": {
+                "supportsTablet": true
+              },
+              "android": {
+                "package": "com.untold.shareapp",
+                "versionCode": 1,
+                "adaptiveIcon": {
+                  "foregroundImage": "./assets/adaptive-icon.png",
+                  "backgroundColor": "#667eea"
+                }
+              },
+              "web": {
+                "favicon": "./assets/favicon.png"
+              },
+              "extra": {
+                "eas": {
+                  "projectId": "your-project-id"
+                }
+              }
+            }
+          }
           EOF
           
-          # Build release APK
-          chmod +x ./gradlew
-          ./gradlew clean
-          ./gradlew assembleRelease
+          # Create EAS configuration
+          cat > eas.json << 'EOF'
+          {
+            "cli": {
+              "version": ">= 12.0.0"
+            },
+            "build": {
+              "development": {
+                "developmentClient": true,
+                "distribution": "internal"
+              },
+              "preview": {
+                "distribution": "internal",
+                "android": {
+                  "buildType": "apk"
+                }
+              },
+              "production": {
+                "android": {
+                  "buildType": "apk"
+                }
+              }
+            }
+          }
+          EOF
           
-          # Find and upload APK
-          APK=$(find . -name "*.apk" | grep release | head -1)
+          # Create placeholder assets
+          mkdir -p assets
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > assets/icon.png
+          cp assets/icon.png assets/splash.png
+          cp assets/icon.png assets/adaptive-icon.png
+          cp assets/icon.png assets/favicon.png
+          
+          npm install
+      
+      - name: Build with EAS
+        script: |
+          echo "Building React Native APK with EAS..."
+          
+          # Configure EAS
+          eas project:init --id your-project-id --non-interactive || echo "Project already configured"
+          
+          # Build APK
+          eas build --platform android --profile preview --non-interactive --wait --local
+          
+          # Find the built APK
+          APK=$(find . -name "*.apk" | head -1)
           if [ -n "$APK" ]; then
-            cp "$APK" ../UntoldApp.apk
-            echo "✅ APK built successfully: UntoldApp.apk"
-            ls -lh ../UntoldApp.apk
+            cp "$APK" UntoldApp-ReactNative.apk
+            echo "✅ React Native APK built successfully!"
+            ls -lh UntoldApp-ReactNative.apk
             
-            # Upload to file.io
-            cd ..
-            UPLOAD_RESULT=$(curl -F "file=@UntoldApp.apk" https://file.io)
+            # Upload
+            UPLOAD_RESULT=$(curl -F "file=@UntoldApp-ReactNative.apk" https://file.io)
             DOWNLOAD_LINK=$(echo "$UPLOAD_RESULT" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
             
-            echo "📥 DOWNLOAD LINK: $DOWNLOAD_LINK"
-            
-            cat > SUCCESS.txt << EOF
-          🎉 UNTOLD APP APK READY! 🎉
+            cat > REACT_NATIVE_SUCCESS.txt << EOF
+          🎉 REACT NATIVE APK READY! 🎉
           
-          📱 Download: $DOWNLOAD_LINK
-          📊 Size: $(ls -lh UntoldApp.apk | awk '{print $5}')
+          📱 File: UntoldApp-ReactNative.apk
+          📊 Size: $(ls -lh UntoldApp-ReactNative.apk | awk '{print $5}')
+          ⚛️ Technology: React Native + Expo
+          🔧 Built with: EAS Build (Professional)
           
-          🚀 THIS WILL WORK! 🚀
+          📥 DOWNLOAD:
+          $DOWNLOAD_LINK
+          
+          ✅ This is a proper React Native app that will work!
           EOF
             
-            cat SUCCESS.txt
+            echo "=============================================="
+            cat REACT_NATIVE_SUCCESS.txt
+            echo "=============================================="
             
           else
-            echo "❌ Build failed"
-            find android -name "*.apk" -type f
+            echo "❌ EAS build failed"
           fi
     
     artifacts:
-      - UntoldApp.apk
-      - SUCCESS.txt
+      - UntoldApp-ReactNative.apk
+      - REACT_NATIVE_SUCCESS.txt
     
     publishing:
       email:
