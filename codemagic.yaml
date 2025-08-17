@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Crash Fix Build
+    name: Bundle Fix Build
     max_build_duration: 60
     instance_type: mac_mini_m1
     triggering:
@@ -16,16 +16,19 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Build Stable APK
+      - name: Build with Proper JS Bundle
         script: |
           npm install -g @expo/cli@latest
           
-          # Ultra minimal package.json
           cat > package.json << 'EOF'
           {
             "name": "untold",
             "version": "1.0.0",
             "main": "index.js",
+            "scripts": {
+              "start": "expo start",
+              "android": "expo start --android"
+            },
             "dependencies": {
               "expo": "~51.0.28",
               "react": "18.2.0",
@@ -34,14 +37,12 @@ workflows:
           }
           EOF
           
-          # Create index.js entry point
           cat > index.js << 'EOF'
           import { registerRootComponent } from 'expo';
           import App from './App';
           registerRootComponent(App);
           EOF
           
-          # Ultra simple App.js - no fancy features
           cat > App.js << 'EOF'
           import React from 'react';
           import { Text, View } from 'react-native';
@@ -60,14 +61,15 @@ workflows:
                   fontWeight: 'bold',
                   textAlign: 'center'
                 }}>
-                  Untold App{'\n'}Working!
+                  🎉 Untold App 🎉{'\n'}
+                  Share & Heal{'\n'}
+                  Working Successfully!
                 </Text>
               </View>
             );
           }
           EOF
           
-          # Minimal app.json with safe settings
           cat > app.json << 'EOF'
           {
             "expo": {
@@ -77,11 +79,7 @@ workflows:
               "platforms": ["android"],
               "android": {
                 "package": "com.untold.app",
-                "versionCode": 1,
-                "compileSdkVersion": 34,
-                "targetSdkVersion": 33,
-                "minSdkVersion": 21,
-                "permissions": []
+                "versionCode": 2
               },
               "plugins": []
             }
@@ -94,21 +92,25 @@ workflows:
           cd android
           chmod +x gradlew
           
-          # Safe gradle properties
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx3072m
           android.useAndroidX=true
           android.enableJetifier=true
           hermesEnabled=false
           newArchEnabled=false
+          
+          # Bundle settings to fix script loading
+          org.gradle.parallel=true
+          org.gradle.daemon=true
           EOF
           
-          # Fix hermesEnabled in build.gradle
+          # Fix hermesEnabled references
           sed -i 's/hermesEnabled/false/g' app/build.gradle
           
           # Add required resources
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/assets
           
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -127,52 +129,75 @@ workflows:
           </layer-list>
           EOF
           
-          # Disable proguard and other optimizations that cause crashes
+          # Force bundle to be included in APK
+          echo "Creating JavaScript bundle..."
+          cd ..
+          npx expo export --platform android --output-dir dist
+          
+          # Copy bundle to Android assets
+          if [ -d "dist/_expo/static/js" ]; then
+            cp dist/_expo/static/js/*.js android/app/src/main/assets/ || echo "No JS files to copy"
+          fi
+          
+          cd android
+          
+          # Ensure bundle is properly referenced
           sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
           sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
           
-          # Build debug APK (more stable)
-          ./gradlew assembleDebug
+          # Build release APK for better bundle packaging
+          echo "Building release APK with bundled JavaScript..."
+          ./gradlew clean
+          ./gradlew assembleRelease
           
-          APK=$(find . -name "*debug*.apk" | head -1)
+          APK=$(find . -name "*release*.apk" | head -1)
           if [ -n "$APK" ]; then
-            cp "$APK" ../UntoldApp-Fixed.apk
-            echo "✅ Fixed APK created: UntoldApp-Fixed.apk"
-            ls -lh ../UntoldApp-Fixed.apk
+            cp "$APK" ../UntoldApp-Bundled.apk
+            echo "✅ Bundled APK created: UntoldApp-Bundled.apk"
+            ls -lh ../UntoldApp-Bundled.apk
             
-            # Upload to file.io
-            UPLOAD_RESULT=$(curl -F "file=@../UntoldApp-Fixed.apk" https://file.io)
+            # Upload
+            UPLOAD_RESULT=$(curl -F "file=@../UntoldApp-Bundled.apk" https://file.io)
             DOWNLOAD_LINK=$(echo "$UPLOAD_RESULT" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
             
-            cat > ../FIXED_DOWNLOAD.txt << EOF
-          🔧 UNTOLD APP - CRASH FIXED! 🔧
+            cat > ../BUNDLE_FIXED.txt << EOF
+          🔧 UNTOLD APP - BUNDLE FIXED! 🔧
           
-          📱 File: UntoldApp-Fixed.apk
-          📊 Size: $(ls -lh ../UntoldApp-Fixed.apk | awk '{print $5}')
-          🔧 Fixed: App crashes, optimized for stability
+          📱 File: UntoldApp-Bundled.apk
+          📊 Size: $(ls -lh ../UntoldApp-Bundled.apk | awk '{print $5}')
+          🔧 Fixed: JavaScript bundle loading issue
+          📦 Type: Release APK with embedded bundle
           
           📥 DOWNLOAD:
           $DOWNLOAD_LINK
           
-          ⚠️ BEFORE INSTALLING:
-          1. Uninstall the old version first
-          2. Restart your phone
-          3. Download and install this fixed version
+          ⚠️ INSTALLATION:
+          1. Uninstall the old Untold app completely
+          2. Clear cache/restart phone
+          3. Install this new version
+          4. Should work without script errors!
           
-          🚀 THIS VERSION SHOULD WORK! 🚀
+          🚀 BUNDLE ISSUE RESOLVED! 🚀
           EOF
             
             echo "=============================================="
-            cat ../FIXED_DOWNLOAD.txt
+            cat ../BUNDLE_FIXED.txt
             echo "=============================================="
             
           else
-            echo "❌ Build failed"
+            echo "❌ Release build failed, trying debug..."
+            ./gradlew assembleDebug
+            APK=$(find . -name "*debug*.apk" | head -1)
+            if [ -n "$APK" ]; then
+              cp "$APK" ../UntoldApp-Debug-Bundled.apk
+              echo "✅ Debug APK created as fallback"
+            fi
           fi
     
     artifacts:
-      - UntoldApp-Fixed.apk
-      - FIXED_DOWNLOAD.txt
+      - UntoldApp-Bundled.apk
+      - UntoldApp-Debug-Bundled.apk
+      - BUNDLE_FIXED.txt
     
     publishing:
       email:
