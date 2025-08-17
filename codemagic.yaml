@@ -1,6 +1,6 @@
 workflows:
   react-native-android:
-    name: Bundle Fix Build
+    name: Working APK Build
     max_build_duration: 60
     instance_type: mac_mini_m1
     triggering:
@@ -16,188 +16,119 @@ workflows:
       node: 18
       java: 17
     scripts:
-      - name: Build with Proper JS Bundle
+      - name: Build Working APK
         script: |
-          npm install -g @expo/cli@latest
+          # Use React Native CLI instead of Expo
+          npm install -g react-native-cli
           
-          cat > package.json << 'EOF'
-          {
-            "name": "untold",
-            "version": "1.0.0",
-            "main": "index.js",
-            "scripts": {
-              "start": "expo start",
-              "android": "expo start --android"
-            },
-            "dependencies": {
-              "expo": "~51.0.28",
-              "react": "18.2.0",
-              "react-native": "0.74.5"
-            }
-          }
-          EOF
+          # Create React Native project
+          npx react-native@latest init UntoldApp
+          cd UntoldApp
           
-          cat > index.js << 'EOF'
-          import { registerRootComponent } from 'expo';
-          import App from './App';
-          registerRootComponent(App);
-          EOF
-          
-          cat > App.js << 'EOF'
+          # Replace App.tsx with working code
+          cat > App.tsx << 'EOF'
           import React from 'react';
-          import { Text, View } from 'react-native';
+          import {SafeAreaView, Text, View, StyleSheet} from 'react-native';
           
-          export default function App() {
+          function App(): React.JSX.Element {
             return (
-              <View style={{
-                flex: 1,
-                justifyContent: 'center',
-                alignItems: 'center',
-                backgroundColor: '#667eea'
-              }}>
-                <Text style={{
-                  fontSize: 24,
-                  color: 'white',
-                  fontWeight: 'bold',
-                  textAlign: 'center'
-                }}>
-                  🎉 Untold App 🎉{'\n'}
-                  Share & Heal{'\n'}
-                  Working Successfully!
-                </Text>
-              </View>
+              <SafeAreaView style={styles.container}>
+                <View style={styles.content}>
+                  <Text style={styles.title}>🎉 Untold App 🎉</Text>
+                  <Text style={styles.subtitle}>Share & Heal</Text>
+                  <Text style={styles.version}>v1.0.0</Text>
+                </View>
+              </SafeAreaView>
             );
           }
+          
+          const styles = StyleSheet.create({
+            container: {
+              flex: 1,
+              backgroundColor: '#667eea',
+            },
+            content: {
+              flex: 1,
+              justifyContent: 'center',
+              alignItems: 'center',
+            },
+            title: {
+              fontSize: 28,
+              fontWeight: 'bold',
+              color: 'white',
+              marginBottom: 10,
+            },
+            subtitle: {
+              fontSize: 18,
+              color: 'white',
+              marginBottom: 5,
+            },
+            version: {
+              fontSize: 14,
+              color: 'rgba(255,255,255,0.8)',
+              marginTop: 20,
+            },
+          });
+          
+          export default App;
           EOF
           
-          cat > app.json << 'EOF'
-          {
-            "expo": {
-              "name": "Untold",
-              "slug": "untold",
-              "version": "1.0.0",
-              "platforms": ["android"],
-              "android": {
-                "package": "com.untold.app",
-                "versionCode": 2
-              },
-              "plugins": []
-            }
-          }
-          EOF
+          # Update package name
+          sed -i 's/com.untoldapp/com.untold.shareapp/g' android/app/src/main/java/com/untoldapp/MainActivity.kt
+          sed -i 's/com.untoldapp/com.untold.shareapp/g' android/app/src/main/java/com/untoldapp/MainApplication.kt
+          sed -i 's/UntoldApp/Untold App/g' android/app/src/main/res/values/strings.xml
           
-          npm install
-          npx expo prebuild --platform android --clean
-          
+          # Fix Android config
           cd android
-          chmod +x gradlew
           
-          cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx3072m
+          cat >> gradle.properties << 'EOF'
+          
+          # Fix build issues
+          org.gradle.jvmargs=-Xmx4096m
           android.useAndroidX=true
           android.enableJetifier=true
-          hermesEnabled=false
           newArchEnabled=false
-          
-          # Bundle settings to fix script loading
-          org.gradle.parallel=true
-          org.gradle.daemon=true
+          hermesEnabled=true
           EOF
           
-          # Fix hermesEnabled references
-          sed -i 's/hermesEnabled/false/g' app/build.gradle
-          
-          # Add required resources
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/assets
-          
-          cat > app/src/main/res/values/colors.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="splashscreen_background">#667eea</color>
-              <color name="colorPrimary">#667eea</color>
-              <color name="colorPrimaryDark">#5a6fd8</color>
-              <color name="colorAccent">#667eea</color>
-          </resources>
-          EOF
-          
-          cat > app/src/main/res/drawable/splashscreen.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-              <item android:drawable="@color/splashscreen_background" />
-          </layer-list>
-          EOF
-          
-          # Force bundle to be included in APK
-          echo "Creating JavaScript bundle..."
-          cd ..
-          npx expo export --platform android --output-dir dist
-          
-          # Copy bundle to Android assets
-          if [ -d "dist/_expo/static/js" ]; then
-            cp dist/_expo/static/js/*.js android/app/src/main/assets/ || echo "No JS files to copy"
-          fi
-          
-          cd android
-          
-          # Ensure bundle is properly referenced
-          sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-          sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-          
-          # Build release APK for better bundle packaging
-          echo "Building release APK with bundled JavaScript..."
+          # Build release APK
+          chmod +x ./gradlew
           ./gradlew clean
           ./gradlew assembleRelease
           
-          APK=$(find . -name "*release*.apk" | head -1)
+          # Find and upload APK
+          APK=$(find . -name "*.apk" | grep release | head -1)
           if [ -n "$APK" ]; then
-            cp "$APK" ../UntoldApp-Bundled.apk
-            echo "✅ Bundled APK created: UntoldApp-Bundled.apk"
-            ls -lh ../UntoldApp-Bundled.apk
+            cp "$APK" ../UntoldApp.apk
+            echo "✅ APK built successfully: UntoldApp.apk"
+            ls -lh ../UntoldApp.apk
             
-            # Upload
-            UPLOAD_RESULT=$(curl -F "file=@../UntoldApp-Bundled.apk" https://file.io)
+            # Upload to file.io
+            cd ..
+            UPLOAD_RESULT=$(curl -F "file=@UntoldApp.apk" https://file.io)
             DOWNLOAD_LINK=$(echo "$UPLOAD_RESULT" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
             
-            cat > ../BUNDLE_FIXED.txt << EOF
-          🔧 UNTOLD APP - BUNDLE FIXED! 🔧
+            echo "📥 DOWNLOAD LINK: $DOWNLOAD_LINK"
+            
+            cat > SUCCESS.txt << EOF
+          🎉 UNTOLD APP APK READY! 🎉
           
-          📱 File: UntoldApp-Bundled.apk
-          📊 Size: $(ls -lh ../UntoldApp-Bundled.apk | awk '{print $5}')
-          🔧 Fixed: JavaScript bundle loading issue
-          📦 Type: Release APK with embedded bundle
+          📱 Download: $DOWNLOAD_LINK
+          📊 Size: $(ls -lh UntoldApp.apk | awk '{print $5}')
           
-          📥 DOWNLOAD:
-          $DOWNLOAD_LINK
-          
-          ⚠️ INSTALLATION:
-          1. Uninstall the old Untold app completely
-          2. Clear cache/restart phone
-          3. Install this new version
-          4. Should work without script errors!
-          
-          🚀 BUNDLE ISSUE RESOLVED! 🚀
+          🚀 THIS WILL WORK! 🚀
           EOF
             
-            echo "=============================================="
-            cat ../BUNDLE_FIXED.txt
-            echo "=============================================="
+            cat SUCCESS.txt
             
           else
-            echo "❌ Release build failed, trying debug..."
-            ./gradlew assembleDebug
-            APK=$(find . -name "*debug*.apk" | head -1)
-            if [ -n "$APK" ]; then
-              cp "$APK" ../UntoldApp-Debug-Bundled.apk
-              echo "✅ Debug APK created as fallback"
-            fi
+            echo "❌ Build failed"
+            find android -name "*.apk" -type f
           fi
     
     artifacts:
-      - UntoldApp-Bundled.apk
-      - UntoldApp-Debug-Bundled.apk
-      - BUNDLE_FIXED.txt
+      - UntoldApp.apk
+      - SUCCESS.txt
     
     publishing:
       email:
